@@ -1,0 +1,27 @@
+#ifndef NUMERICAL_PROPERTIES_H
+#define NUMERICAL_PROPERTIES_H
+
+#include <stdexcept>
+//精灵属性
+class numerical_properties
+{
+// private:
+public:
+    // int hp;
+    // int speed;
+    // int attack;
+    // int defense;
+    // int specialAttack;
+    // int specialDefense;
+    mutable int arr[6] = {0};   // 0:attack 1:specialAttack 2:defense 3:specialDefense 4:speed 5:hp
+    numerical_properties();
+    ~numerical_properties();
+    int & operator[](int index)const {
+        if (index < 0 || index >= 6) {
+            throw std::out_of_range("Index out of range");
+        }
+        return arr[index];
+    }
+};
+
+#endif // NUMERICAL_PROPERTIES_H
