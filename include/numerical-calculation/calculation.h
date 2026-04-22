@@ -30,6 +30,37 @@ class Calculation {
         }
         return damage;
     }
+
+    static int applyDamageReduction(int base_damage, const int add_reduce[4], const int mul_reduce[4]) {
+        double add_sum = 0.0;
+        for (int i = 0; i < 4; ++i) {
+            add_sum += static_cast<double>(add_reduce[i]);
+        }
+        if (add_sum > 100.0) {
+            add_sum = 100.0;
+        }
+        if (add_sum < -100.0) {
+            add_sum = -100.0;
+        }
+
+        double mul_coef = 1.0;
+        for (int i = 0; i < 4; ++i) {
+            double v = static_cast<double>(mul_reduce[i]);
+            if (v > 100.0) {
+                v = 100.0;
+            }
+            if (v < -100.0) {
+                v = -100.0;
+            }
+            mul_coef *= (1.0 - v / 100.0);
+        }
+
+        double result = static_cast<double>(base_damage) * (1.0 - add_sum / 100.0) * mul_coef;
+        if (result < 0.0) {
+            result = 0.0;
+        }
+        return static_cast<int>(result);
+    }
     static double calculateRestraintMultiples(const int attacker[2], const int defender[2]) {
         double multiples = 1.0;
         if(attacker[1] == 0 && defender[1] == 0) {  //1 v 1

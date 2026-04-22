@@ -6,7 +6,7 @@
 #include <future>
 #include <atomic>
 
-namespace mail_system {
+// namespace mail_system {
 
 /**
  * @brief 线程池基类
@@ -90,6 +90,6 @@ protected:
     virtual void post_impl(std::function<void()> f) = 0;
 };
 
-} // namespace mail_system
+// } // namespace mail_system
 
 #endif // MAIL_SYSTEM_THREAD_POOL_BASE_H

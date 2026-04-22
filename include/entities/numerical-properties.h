@@ -2,6 +2,16 @@
 #define NUMERICAL_PROPERTIES_H
 
 #include <stdexcept>
+
+enum class NumericalPropertyIndex {
+    ATTACK = 0,
+    SPECIAL_ATTACK = 1,
+    DEFENSE = 2,
+    SPECIAL_DEFENSE = 3,
+    SPEED = 4,
+    HP = 5
+};
+
 //精灵属性
 class numerical_properties
 {

@@ -32,6 +32,29 @@ public:
             throw std::invalid_argument("Skills array cannot be null");
     }
     ~ElfPet() = default;
+    int getTempAbilityValue(int index) const {
+        if (index < 0 || index >= 6) {
+            throw std::out_of_range("Index out of range");
+        }
+        if (level[index] < -6 || level[index] > 6) {
+            throw std::out_of_range("Level out of range");
+        }
+        if (level[index] >= 0) {
+            return numericalProperties[index] * ((level[index] + 2) / 2.0);
+        }
+        if (index == 5 && level[index] >= -6) {
+            // return Cm * 100
+            switch (level[index]) {
+                case -1: return 85;
+                case -2: return 70;
+                case -3: return 55;
+                case -4: return 45;
+                case -5: return 35;
+                case -6: return 25;
+            }
+        }
+        return numericalProperties[index] * (2.0 / (2 + level[index]));
+    }
 
 // private:
     int elementalAttributes[2]; //元素属性
@@ -40,6 +63,7 @@ public:
     numerical_properties numericalProperties;   // 对局外的数值属性
     int hp;          // Health Points
     int level[6];   //攻击，防御，特攻，特防，速度，命中
+    int speed_priority; //速度优先级    0~5 必先 >=6 正常
     int shield;    //当前护盾值
     int cover;    //当前护罩值
     bool is_locked; //是否被封印
@@ -50,5 +74,7 @@ public:
     int id;
     std::string name;
 };
+
+
 
 #endif // ELF_PET_H

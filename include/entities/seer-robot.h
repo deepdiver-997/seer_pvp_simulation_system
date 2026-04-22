@@ -9,6 +9,7 @@ class SeerRobot
     public:
     SeerRobot(std::array<ElfPet, 6> elfPets_, std::array<int, MEDICINES_SIZE> medicines_)
      :elfPets(elfPets_), medicines(medicines_) {}
+    ~SeerRobot() = default;
     std::array<ElfPet, 6> elfPets;
     std::array<int, MEDICINES_SIZE> medicines;
     int allive() {

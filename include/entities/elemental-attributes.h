@@ -4,9 +4,12 @@
 #include <iostream>
 #include <memory>
 
+#include <db/db_service.h>
+
 //元素克制关系
 class ElementalAttributes {
 public:
+    // static 
     ElementalAttributes();
     ~ElementalAttributes();
     void loadElementalAttributes();
