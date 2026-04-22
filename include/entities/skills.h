@@ -1,43 +1,47 @@
 #ifndef SKILLS_H
 #define SKILLS_H
 
+#include <map>
+#include <vector>
 #include <effects/effect.h>
-#include <fsm/battleContext.h>
+#include <effects/continuousEffect.h>
+
+// Forward declare BattleContext and State
+class BattleContext;
+enum class State;
 
 class Skills {
 public:
-    Skills() = default; // Default constructor
-    ~Skills() = default; // Default destructor
-    // private:
-    void loadSkills(); // Function to load skills
-    bool skill_usable(); // Indicates if the skill can be used
-    bool is_locked; // Indicates if the skill is locked
+    Skills() = default;
+    ~Skills() = default;
+
+    void loadSkills();
+    bool skill_usable();
+
+    bool is_locked;
     int maxPP;
-    int pp; // pp == -1 -> using skills without limitation of pp
+    int pp;  // pp == -1 -> 技能使用无限制
     int id;
     std::string name;
-    std::vector<std::pair<State, Effect>> effects; // Vector to hold effects associated with the skill
-    int type; // Type of the skill, e.g., 0: physical, 1: status, 2: special
-    int power; // Power of the skill
-    int accuracy; // Accuracy of the skill
-    float critical_strike_rate; // Critical strike rate of the skill
-    int priority; // Priority of the skill
-    int element[2];
+
+    // 技能分类：0=物理, 1=属性(变化), 2=特殊
+    int type;
+    int power;
+    int accuracy;
+    float critical_strike_rate;
+    int priority;
+    int element[2];  // 元素属性
+
+    // 效果分支表 - 不同执行结果对应不同的效果列表
+    // Skill执行后会根据执行结果(HIT/MISS/EFFECT_INVALID/SKILL_INVALID)
+    // 从这里取出对应的效果指针列表注册到 BattleContext
+    // raw Effect* 指针指向 EffectFactory 中持有的数据，生命周期由Skills保证
+    std::map<SkillExecResult, std::vector<Effect*>> effectBranches;
 };
 
 void Skills::loadSkills() {
-    // Implementation to load skills from a data source
-    // This could involve reading from a file or database
-    std::vector<int> skillIds = {1, 2, 3, 4, 5}; // Example skill IDs
-    effects.reserve(skillIds.size()); 
-    for (int id : skillIds) {
-        auto effect = EffectFactory::getInstance().getEffect(id);
-        if (effect.logic == nullptr) {
-            continue; // error handling if effect is not found
-        }
-        effects.emplace_back(effect);
-    }
-    // For now, we can leave it empty or add some mock data
+    // TODO: 从数据库加载技能效果分支
+    // effectBranches[SkillExecResult::HIT].push_back(effectPtr);
 }
 
 bool Skills::skill_usable() {

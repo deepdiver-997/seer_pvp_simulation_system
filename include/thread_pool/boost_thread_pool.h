@@ -18,7 +18,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace mail_system {
+// namespace mail_system {
 
 /**
  * @brief 基于Boost的线程池实现
@@ -150,6 +150,6 @@ private:
     std::mutex m_mutex;                             ///< 互斥锁，保护线程池状态
 };
 
-} // namespace mail_system
+// } // namespace mail_system
 
 #endif // MAIL_SYSTEM_BOOST_THREAD_POOL_H

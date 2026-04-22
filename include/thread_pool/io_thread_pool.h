@@ -17,7 +17,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace mail_system {
+// namespace mail_system {
 /**
  * @brief IO线程池实现
  * 
@@ -200,6 +200,6 @@ private:
     std::atomic<int> m_id_counter{0};                            ///< 任务ID计数器
 };
 
-} // namespace mail_system
+// } // namespace mail_system
 
 #endif // MAIL_SYSTEM_IO_THREAD_POOL_H
