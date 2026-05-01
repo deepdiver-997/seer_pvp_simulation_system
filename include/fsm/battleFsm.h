@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <functional>
+#include <string>
 #include <entities/seer-robot.h>
 #include <thread_pool/boost_thread_pool.h>
 
@@ -21,6 +22,7 @@ public:
         CHOOSE_PET,
         SELECT_SKILL,
         USE_MEDICINE,
+        NONE,   // 跳过出手阶段但是回合类效果依旧触发，比如被控制但是点击了技能
         SEND_EMOJI
     };
 
@@ -51,6 +53,9 @@ public:
 
 private:
     std::unordered_map<State, HandlerType> stateHandlerMap;
+    bool verbose_trace_ = false;
+
+    void trace_fsm(const BattleContext* battleContext, const std::string& phase) const;
 
     bool runInternal(BattleContext* battleContext);
 

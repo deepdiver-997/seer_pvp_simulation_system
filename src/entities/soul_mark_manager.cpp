@@ -1,18 +1,12 @@
-#include <effects/effect.h>
-#include <fsm/battleContext.h>
+#include <entities/soul_mark_manager.h>
+#include <utils/dynamic_library.h>
 #include <plugin/plugin_interface.h>
 
-#include <cstdlib>
-#include <algorithm>
+#include <dirent.h>
 #include <array>
 #include <cstring>
 
 #if defined(_WIN32) || defined(_WIN64)
-    #include <windows.h>
-#endif
-
-#if !defined(_WIN32) && !defined(_WIN64)
-    #include <dirent.h>
 #endif
 
 namespace {
@@ -36,37 +30,21 @@ bool has_dynamic_library_extension(const std::string& filename) {
 }
 #else
 bool has_dynamic_library_extension(const std::string& filename) {
-    constexpr std::array<const char*, 1> kExts = {".so"};
-    for (const char* ext : kExts) {
-        if (filename.size() >= std::strlen(ext)
-            && filename.compare(filename.size() - std::strlen(ext), std::strlen(ext), ext) == 0) {
-            return true;
-        }
-    }
-    return false;
+    constexpr const char* kExt = ".so";
+    return filename.size() >= std::strlen(kExt)
+        && filename.compare(filename.size() - std::strlen(kExt), std::strlen(kExt), kExt) == 0;
 }
 #endif
 
 } // namespace
 
-Effect::Effect(int id, int priority, int owner, int lr, EffectArgs args, EffectFn logic)
-    : id(id), priority(priority), left_round(lr), owner(owner), logic(logic), args(std::move(args)) {}
-
-EffectFactory::EffectFactory() : initialized_(false) {
-}
-
-void EffectFactory::init() {
-    // 效果现在从动态库加载，init()保持为空
-    // 实际加载在 getInstance() 首次调用时通过 ensureInitialized() 完成
-}
-
-EffectFactory& EffectFactory::getInstance(const std::string& lib_dir) {
-    static EffectFactory instance;
+SoulMarkManager& SoulMarkManager::getInstance(const std::string& lib_dir) {
+    static SoulMarkManager instance;
     instance.ensureInitialized(lib_dir);
     return instance;
 }
 
-void EffectFactory::ensureInitialized(const std::string& lib_dir) {
+void SoulMarkManager::ensureInitialized(const std::string& lib_dir) {
     if (initialized_) {
         return;
     }
@@ -104,7 +82,7 @@ void EffectFactory::ensureInitialized(const std::string& lib_dir) {
                 std::string full_path = lib_dir + "\\" + filename;
                 DynamicLibrary lib(full_path);
                 if (lib.isLoaded()) {
-                    DLSymbol symbol = lib.getSymbol(kSkillPluginInitFn);
+                    DLSymbol symbol = lib.getSymbol(kSoulMarkPluginInitFn);
                     if (symbol) {
                         pending_libs.push_back({std::move(lib), reinterpret_cast<PluginRegisterFn>(symbol)});
                     } else {
@@ -130,7 +108,7 @@ void EffectFactory::ensureInitialized(const std::string& lib_dir) {
             std::string full_path = lib_dir + "/" + filename;
             DynamicLibrary lib(full_path);
             if (lib.isLoaded()) {
-                DLSymbol symbol = lib.getSymbol(kSkillPluginInitFn);
+                DLSymbol symbol = lib.getSymbol(kSoulMarkPluginInitFn);
                 if (symbol) {
                     pending_libs.push_back({std::move(lib), reinterpret_cast<PluginRegisterFn>(symbol)});
                 } else {
@@ -156,7 +134,7 @@ void EffectFactory::ensureInitialized(const std::string& lib_dir) {
     initialized_ = true;
 }
 
-void EffectFactory::loadFromDynamicLibraries(const std::string& lib_dir) {
+void SoulMarkManager::loadFromDynamicLibraries(const std::string& lib_dir) {
     // Scan directory for dynamic libraries and load them
 #if defined(_WIN32) || defined(_WIN64)
     WIN32_FIND_DATAA find_data;
@@ -174,7 +152,7 @@ void EffectFactory::loadFromDynamicLibraries(const std::string& lib_dir) {
                 DynamicLibrary lib(full_path);
                 if (lib.isLoaded()) {
                     // Try to get the plugin registration function
-                    DLSymbol symbol = lib.getSymbol(kSkillPluginInitFn);
+                    DLSymbol symbol = lib.getSymbol(kSoulMarkPluginInitFn);
                     if (symbol) {
                         auto register_fn = reinterpret_cast<PluginRegisterFn>(symbol);
                         register_fn(this);  // Pass 'this' as the registry
@@ -202,7 +180,7 @@ void EffectFactory::loadFromDynamicLibraries(const std::string& lib_dir) {
             DynamicLibrary lib(full_path);
             if (lib.isLoaded()) {
                 // Try to get the plugin registration function
-                DLSymbol symbol = lib.getSymbol(kSkillPluginInitFn);
+                DLSymbol symbol = lib.getSymbol(kSoulMarkPluginInitFn);
                 if (symbol) {
                     auto register_fn = reinterpret_cast<PluginRegisterFn>(symbol);
                     register_fn(this);  // Pass 'this' as the registry
@@ -216,70 +194,48 @@ void EffectFactory::loadFromDynamicLibraries(const std::string& lib_dir) {
 #endif
 }
 
-Effect EffectFactory::getEffect(int id, EffectArgs args) {
-    EffectFn fn = nullptr;
+EffectFn SoulMarkManager::getEffectFunc(int soulmarkId) {
     {
         std::shared_lock<std::shared_mutex> read_lock(cache_mutex_);
-        auto it = effect_cache_.find(id);
+        auto it = effect_cache_.find(soulmarkId);
         if (it != effect_cache_.end()) {
-            fn = it->second;
+            return it->second;
         }
     }
-
-    Effect effect(id, 0, 0, 0, std::move(args), fn);
-    return effect;
+    // Not found, return noop
+    return &SoulMarkManager::noop_effect;
 }
 
-EffectPtr EffectFactory::createEffect(int id, EffectArgs args) {
-    Effect effect = getEffect(id, std::move(args));
-    if (effect.logic == nullptr) {
-        return nullptr;
-    }
-    return std::make_shared<Effect>(effect);
-}
-
-bool EffectFactory::no_confilict(int id1, int id2) {
-    if ((id1 == 0 && id2 == 1) || (id1 == 1 && id2 == 0)) {
-        return false;
-    }
-    return true;
-}
-
-bool EffectFactory::roll_percent(int percent) {
-    if (percent <= 0) return false;
-    if (percent >= 100) return true;
-    return (std::rand() % 100) < percent;
-}
-
-void EffectFactory::registerEffect(int effectId, EffectFn effect) {
+void SoulMarkManager::registerEffect(int soulmarkId, EffectFn effect) {
     std::unique_lock<std::shared_mutex> write_lock(cache_mutex_);
-    effect_cache_[effectId] = effect;
+    effect_cache_[soulmarkId] = effect;
 }
 
-void EffectFactory::registerSoulMark(int soulmark_id, EffectFn effect_fn) {
-    // EffectFactory doesn't handle soul marks
-    (void)soulmark_id;
+void SoulMarkManager::registerSoulMark(int soulmark_id, EffectFn effect_fn) {
+    registerEffect(soulmark_id, effect_fn);
+}
+
+void SoulMarkManager::registerSkillEffect(int effect_id, EffectFn effect_fn) {
+    // SoulMarkManager only handles soul marks, not skill effects
+    // This is a no-op for soul mark manager
+    (void)effect_id;
     (void)effect_fn;
 }
 
-void EffectFactory::registerSkillEffect(int effect_id, EffectFn effect_fn) {
-    registerEffect(effect_id, effect_fn);
-}
-
-void EffectFactory::registerSoulMarks(
+void SoulMarkManager::registerSoulMarks(
     const std::vector<std::pair<int, EffectFn>>& soulmarks) {
-    // EffectFactory doesn't handle soul marks
-    (void)soulmarks;
-}
-
-void EffectFactory::registerSkillEffects(
-    const std::vector<std::pair<int, EffectFn>>& effects) {
     std::unique_lock<std::shared_mutex> write_lock(cache_mutex_);
-    for (const auto& [id, fn] : effects) {
+    for (const auto& [id, fn] : soulmarks) {
         effect_cache_[id] = fn;
     }
 }
 
-size_t EffectFactory::getLoadedLibraryCount() const {
+void SoulMarkManager::registerSkillEffects(
+    const std::vector<std::pair<int, EffectFn>>& effects) {
+    // SoulMarkManager only handles soul marks, not skill effects
+    (void)effects;
+}
+
+size_t SoulMarkManager::getLoadedLibraryCount() const {
     return loaded_libraries_.size();
 }

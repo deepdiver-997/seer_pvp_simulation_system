@@ -1,7 +1,8 @@
 #ifndef SEER_ROBOT_H
 #define SEER_ROBOT_H
 
-#include <elf-pet.h>
+#include <array>
+#include <entities/elf-pet.h>
 #define MEDICINES_SIZE 10
 
 class SeerRobot
@@ -12,7 +13,7 @@ class SeerRobot
     ~SeerRobot() = default;
     std::array<ElfPet, 6> elfPets;
     std::array<int, MEDICINES_SIZE> medicines;
-    int allive() {
+    int allive() const {
         int alive = 0;
         for (const auto &pet : elfPets) {
             if (pet.hp > 0)

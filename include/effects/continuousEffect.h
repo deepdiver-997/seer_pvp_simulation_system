@@ -6,6 +6,7 @@
 #include <effects/effect.h>
 
 class BattleContext;
+class Skills;
 enum class State;
 
 /**
@@ -13,35 +14,36 @@ enum class State;
  *
  * Skill/魂印中的 Effect 是模板（函数指针+参数），不可变。
  * ContinuousEffect 是 Effect 的实例化，保存运行状态和上下文。
+ *
+ * 回合过期机制：
+ * - registered_round_: 注册时的回合数
+ * - duration_rounds_: 持续回合数
+ * 判断过期：currentRound - registered_round_ >= duration_rounds_
  */
 class ContinuousEffect {
 public:
+    explicit ContinuousEffect(int owner = -1) : owner_(owner) {}
     virtual ~ContinuousEffect() = default;
 
     virtual bool operator()(BattleContext* ctx) = 0;
     virtual bool check(BattleContext* ctx) const { (void)ctx; return false; }
     virtual bool consume(BattleContext* ctx) { (void)ctx; return false; }
-    virtual void onRoundEnd() {}
     virtual State getTriggerState() const = 0;
     int owner() const { return owner_; }
-    virtual bool isExpired() const = 0;
+    virtual bool isExpired(int currentRound) const = 0;
     virtual int getEffectId() const = 0;
     virtual bool isRoundEffect() const { return false; }
     virtual int getEffectCategory() const { return -1; }
-    virtual int getCreatedInId() const { return -1; }
+    virtual int getRegisteredRound() const { return -1; }
+
+    // 回合效果版本号 — 用于 O(1) 断回合
+    // 注册时从 BattleContext::round_effect_valid_id[owner] 复制。
+    // 执行前比较 this->valid_id_ == ctx->round_effect_valid_id[owner]，
+    // 不等说明该效果已被断回合失效。
+    int valid_id_ = 0;
 
 protected:
     int owner_;
-};
-
-/**
- * SkillExecResult - 技能执行结果
- */
-enum class SkillExecResult {
-    HIT,
-    MISS,
-    EFFECT_INVALID,
-    SKILL_INVALID,
 };
 
 /**
@@ -49,24 +51,23 @@ enum class SkillExecResult {
  */
 class ContinuousEffectFromEffect : public ContinuousEffect {
 protected:
-    Effect* effect_;
+    Effect effect_;
     State triggerState_;
-    int createdInId_;
-    int remainingRounds_;
+    int registered_round_;   // 注册时的回合数
+    int duration_rounds_;    // 持续回合数
 
 public:
-    ContinuousEffectFromEffect() : owner_(-1), effect_(nullptr), remainingRounds_(-1), createdInId_(-1), triggerState_(State::GAME_START) {}
-    ContinuousEffectFromEffect(Effect* e, State trigger, int owner, int rounds = -1, int validId = -1);
+    ContinuousEffectFromEffect() : ContinuousEffect(-1), effect_(), registered_round_(-1), duration_rounds_(-1) {}
+    ContinuousEffectFromEffect(Effect e, State trigger, int owner, int duration, int registeredRound);
 
     bool operator()(BattleContext* ctx) override;
     State getTriggerState() const override { return triggerState_; }
-    bool isExpired() const override;
-    void onRoundEnd() override;
-    int getEffectId() const override { return effect_ ? effect_->id : -1; }
-    bool isRoundEffect() const override { return remainingRounds_ > 0; }
-    int getEffectCategory() const override { return effect_ ? effect_->id : -1; }
-    Effect* getEffect() const { return effect_; }
-    int getCreatedInId() const override { return createdInId_; }
+    bool isExpired(int currentRound) const override;
+    int getEffectId() const override { return effect_.logic ? effect_.id : -1; }
+    bool isRoundEffect() const override { return duration_rounds_ > 0; }
+    int getEffectCategory() const override { return effect_.logic ? effect_.id : -1; }
+    Effect* getEffect() { return &effect_; }
+    int getRegisteredRound() const override { return registered_round_; }
 };
 
 /**
@@ -74,19 +75,18 @@ public:
  */
 template<int EffectId, State Trigger, int InitRounds = -1>
 class RoundContinuousEffect : public ContinuousEffect {
-    int createdInId_;
-    int remainingRounds_;
+    int registered_round_;   // 注册时的回合数
+    int duration_rounds_;    // 持续回合数
 public:
-    RoundContinuousEffect(int owner, int rounds = InitRounds, int validId = -1);
+    RoundContinuousEffect(int owner, int duration = InitRounds, int registeredRound = -1);
 
     bool operator()(BattleContext* ctx) override;
     State getTriggerState() const override { return Trigger; }
-    bool isExpired() const override;
-    void onRoundEnd() override;
+    bool isExpired(int currentRound) const override;
     int getEffectId() const override { return EffectId; }
     bool isRoundEffect() const override { return true; }
     int getEffectCategory() const override { return EffectId; }
-    int getCreatedInId() const override { return createdInId_; }
+    int getRegisteredRound() const override { return registered_round_; }
 };
 
 /**
@@ -103,10 +103,9 @@ public:
     bool check(BattleContext* ctx) const override;
     bool consume(BattleContext* ctx) override;
     State getTriggerState() const override { return Trigger; }
-    bool isExpired() const override;
-    void onRoundEnd() override;
+    bool isExpired(int currentRound) const override;
     int getEffectId() const override { return EffectId; }
-    int getCreatedInId() const override { return -1; }
+    int getRegisteredRound() const override { return -1; }
 };
 
 /**
@@ -118,19 +117,24 @@ public:
 
     bool operator()(BattleContext* ctx) override;
     State getTriggerState() const override { return triggerState_; }
-    bool isExpired() const override { return false; }
-    void onRoundEnd() override {}
+    bool isExpired(int currentRound) const override { (void)currentRound; return false; }
+    void onRoundEnd() {}
     int getEffectId() const override { return -1; }
-    int getCreatedInId() const override { return -1; }
-    int getLastResult() const { return lastSkillResult_; }
+    int getRegisteredRound() const override { return -1; }
+    SkillExecResult getLastResult() const { return lastSkillResult_; }
+    const SkillResolutionFlags& getLastResolutionFlags() const { return lastResolutionFlags_; }
 
 private:
     bool calculateHit(BattleContext* ctx, int attackerId, int skillIndex);
+    bool isHitEffectInvalid(BattleContext* ctx, int attackerId, int skillIndex) const;
+    void applySkillResult(SkillExecResult result);
     void registerBranch(BattleContext* ctx, SkillExecResult result, const Skills& skill);
 
+    int owner_;
     int skillIndex_;
     State triggerState_;
-    int lastSkillResult_;
+    SkillExecResult lastSkillResult_;
+    SkillResolutionFlags lastResolutionFlags_;
 };
 
 #endif // CONTINUOUS_EFFECT_H
