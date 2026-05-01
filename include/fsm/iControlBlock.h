@@ -6,6 +6,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <array>
+#include <deque>
+#include <mutex>
 #include <boost/asio.hpp>
 #include <thread_pool/boost_thread_pool.h>
 
@@ -29,11 +32,18 @@ enum class Command : uint16_t {
     USE_MEDICINE = 2,       // 使用药品
     CHOOSE_PET = 3,         // 切换精灵
     SEND_EMOJI = 4,         // 发送表情
+    INIT_BATTLE = 5,        // 初始化对局
+    CREATE_BATTLE = INIT_BATTLE, // 兼容旧命名
     // 状态查询
     SYNC_STATE = 10,        // 同步状态
     HEARTBEAT = 11,         // 心跳
     // 控制命令
     DUPLICATE_CONTEXT = 100, // 复制战局
+    // 调试命令
+    DEBUG_STEP = 20,         // 单步执行当前状态后停在下一状态
+    DEBUG_CONTINUE = 21,     // 继续执行（取消单步）
+    DEBUG_BREAKPOINT = 22,   // 设置/取消断点
+    DEBUG_FULLSTATE = 23,    // 获取完整状态快照（含效果表）
 };
 
 // 解析后的消息
@@ -90,10 +100,12 @@ public:
 
     // 获取线程池（供 Server 注入）
     virtual std::shared_ptr<BattleFsm> get_fsm() const = 0;
-    virtual void set_battle_pool(std::shared_ptr<BattleFsm> fsm) = 0;
+    virtual void set_fsm(std::shared_ptr<BattleFsm> fsm) = 0;
+    // void set_battle_pool(std::shared_ptr<BoostThreadPool> _battle_pool) { battle_pool_ = _battle_pool; }
 
     // 获取注册的 context（用于启动 battle）
     virtual BattleContext* get_context() = 0;
+    // std::shared_ptr<BoostThreadPool> battle_pool_;
 };
 
 // 训练模式控制块 - 单 Socket，无超时
@@ -101,6 +113,7 @@ public:
 class TrainingControlBlock : public IControlBlock {
 public:
     TrainingControlBlock(int match_id, std::unique_ptr<boost::asio::ip::tcp::socket> socket);
+    ~TrainingControlBlock() override;
 
     void wait_for_input(BattleContext* ctx) override;
 
@@ -122,7 +135,7 @@ public:
     std::unique_ptr<BattleContext> unregister_context(uint32_t uuid) override;
 
     std::shared_ptr<BattleFsm> get_fsm() const override { return fsm_; }
-    void set_battle_pool(std::shared_ptr<BattleFsm> fsm) override { fsm_ = fsm; }
+    void set_fsm(std::shared_ptr<BattleFsm> fsm) override { fsm_ = fsm; }
 
     BattleContext* get_context() override;
 
@@ -145,6 +158,7 @@ private:
     int match_id_;
     std::unique_ptr<boost::asio::ip::tcp::socket> socket_;
     std::shared_ptr<BattleFsm> fsm_;
+    std::array<char, 4096> read_chunk_{};
 
     // uuid -> owned context
     std::unordered_map<uint32_t, std::unique_ptr<BattleContext>> contexts_;
@@ -154,6 +168,10 @@ private:
 
     // 控制块自己的 buffer，处理 TCP 粘包
     std::vector<char> buffer_;
+
+      // 输入消息排队：当 context 正在消费上一条输入时，先入队，等待下一次 wait_for_input 派发。
+      std::unordered_map<uint32_t, std::deque<std::vector<char>>> pending_inputs_;
+    std::mutex pending_inputs_mutex_;
 
     std::string operation_log_;
 };
@@ -165,6 +183,7 @@ public:
     BattleControlBlock(int match_id,
                       std::unique_ptr<boost::asio::ip::tcp::socket> socket1,
                       std::unique_ptr<boost::asio::ip::tcp::socket> socket2);
+    ~BattleControlBlock() override;
 
     void wait_for_input(BattleContext* ctx) override;
 
@@ -186,7 +205,7 @@ public:
     std::unique_ptr<BattleContext> unregister_context(uint32_t uuid) override;
 
     std::shared_ptr<BattleFsm> get_fsm() const override { return fsm_; }
-    void set_battle_pool(std::shared_ptr<BattleFsm> fsm) override { fsm_ = fsm; }
+    void set_fsm(std::shared_ptr<BattleFsm> fsm) override { fsm_ = fsm; }
 
     BattleContext* get_context() override;
 
@@ -210,6 +229,7 @@ private:
     int match_id_;
     std::unique_ptr<boost::asio::ip::tcp::socket> sockets_[2];
     std::shared_ptr<BattleFsm> fsm_;
+    std::array<std::array<char, 4096>, 2> read_chunks_{};
 
     // uuid -> owned context
     std::unordered_map<uint32_t, std::unique_ptr<BattleContext>> contexts_;

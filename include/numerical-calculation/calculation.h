@@ -3,29 +3,23 @@
 
 #include <cstdlib>
 #include <entities/elf-pet.h>
+#include <fsm/battleWorkspace.h>
 
 class Calculation {
     public:
-    static int calculateDamage(const ElfPet& attacker, const ElfPet& defender, const Skills& skill) {
-        if(skill.type == 1) return 0; // Status skills do not deal damage
-        if(skill.element[1] == 0 && defender.elementalAttributes[1] == 0 && ElementalAttributes::elementalAttributesRestraints[skill.element[0]][defender.elementalAttributes[0]] == 0) {
-            return 0; // No elemental attributes to calculate damage
-        }
+    static int calculateDamage(int attacker, const BattleWorkspace& ws, const Skills& skill) {
+        int defender = 1 - attacker;
+        if(skill.type == SkillType::Attribute) return 0; // Status skills do not deal damage
+        // if(skill.element[1] == 0 && defender.elementalAttributes[1] == 0 && ElementalAttributes::elementalAttributesRestraints[skill.element[0]][defender.elementalAttributes[0]] == 0) {
+        //     return 0; // No elemental attributes to calculate damage
+        // }
         double damage = 0.0;
-        double Attack = attacker.numericalProperties[skill.type];
-        double Defense = defender.numericalProperties[skill.type + 2];
-        if(attacker.level[skill.type] > 0)
-        Attack = Attack * ((2 + attacker.level[skill.type]) / 2);
-        else
-        Attack = Attack * (2 / (2 + attacker.level[skill.type]));
-        if(defender.level[skill.type + 2] > 0)
-        Defense = Defense * ((2 + defender.level[skill.type + 2]) / 2);
-        else
-        Defense = Defense * (2 / (2 + defender.level[skill.type + 2]));
+        double Attack = ws.getTempAbilityValue(attacker, static_cast<NumericalPropertyIndex>(skill.type));
+        double Defense = ws.getTempAbilityValue(defender, static_cast<NumericalPropertyIndex>(static_cast<int>(skill.type) + 2));
         damage = (0.84 * Attack / Defense * skill.power + 2)
-                * calculateRestraintMultiples(attacker.elementalAttributes, defender.elementalAttributes)
+                * calculateRestraintMultiples(ws.view_elementalAttributes[attacker], ws.view_elementalAttributes[defender])
                 * (217 + rand() % 39) / 255;
-        if(involve(attacker.elementalAttributes, skill.element)) {
+        if(involve(ws.view_elementalAttributes[attacker], skill.element)) {
             damage *= 1.5; // Elemental advantage
         }
         return damage;

@@ -5,6 +5,7 @@
 #include <memory>
 #include <future>
 #include <atomic>
+#include <type_traits>
 
 // namespace mail_system {
 
@@ -28,11 +29,11 @@ public:
      * @tparam Args 任务函数参数类型
      * @param f 任务函数
      * @param args 任务函数参数
-     * @return std::future<typename std::result_of<F(Args...)>::type> 任务结果的future
+     * @return std::future<std::invoke_result_t<F, Args...>> 任务结果的future
      */
     template<class F, class... Args>
     auto submit(F&& f, Args&&... args) 
-        -> std::future<typename std::result_of<F(Args...)>::type> {
+        -> std::future<std::invoke_result_t<F, Args...>> {
         return submit_impl(std::forward<F>(f), std::forward<Args>(args)...);
     }
 
@@ -75,11 +76,11 @@ protected:
      * @tparam Args 任务函数参数类型
      * @param f 任务函数
      * @param args 任务函数参数
-     * @return std::future<typename std::result_of<F(Args...)>::type> 任务结果的future
+      * @return std::future<std::invoke_result_t<F, Args...>> 任务结果的future
      */
     template<class F, class... Args>
     auto submit_impl(F&& f, Args&&... args) 
-        -> std::future<typename std::result_of<F(Args...)>::type>;
+          -> std::future<std::invoke_result_t<F, Args...>>;
 
     /**
      * @brief 提交任务的实现（无返回值版本）

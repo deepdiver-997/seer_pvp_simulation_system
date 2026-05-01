@@ -17,6 +17,7 @@
 #include <future>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 
 // namespace mail_system {
 
@@ -109,12 +110,12 @@ protected:
      * @tparam Args 任务函数参数类型
      * @param f 任务函数
      * @param args 任务函数参数
-     * @return std::future<typename std::result_of<F(Args...)>::type> 任务结果的future
+      * @return std::future<std::invoke_result_t<F, Args...>> 任务结果的future
      */
     template<class F, class... Args>
     auto submit_impl(F&& f, Args&&... args) 
-        -> std::future<typename std::result_of<F(Args...)>::type> {
-        using return_type = typename std::result_of<F(Args...)>::type;
+          -> std::future<std::invoke_result_t<F, Args...>> {
+          using return_type = std::invoke_result_t<F, Args...>;
 
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_running) {

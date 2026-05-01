@@ -30,6 +30,42 @@
 ## 目录结构
 - `include/`：头文件目录，包含所有模块的接口定义。
 - `resources/`：资源文件目录，如精灵魂印数据。
+- `scripts/`：官方数据抓取、导入 SQLite、数据文档与辅助工具。
+
+## 官方数据文档
+- `scripts/data/official/official_data_pipeline_guide.md`：官方数据抓取/导入/重建流程
+- `scripts/data/official/official_database_schema.md`：SQLite 表结构与字段含义
+- `scripts/data/official/official_data_mapping_for_system.md`：官方数据到 FSM/效果系统的映射建议
+- `scripts/data/official/agent_monster_query_guide.md`：按精灵名字快速检索技能/魂印/效果的工作流
+
+## 官方数据查询工具
+
+按精灵准确名字查询技能、魂印与效果信息：
+
+```bash
+python3 scripts/tools/query_monster_profile.py --name "贾斯"
+```
+
+如果要给脚本或 agent 二次消费，可以使用：
+
+```bash
+python3 scripts/tools/query_monster_profile.py --name "贾斯" --json
+```
+
+## 官方数据运行时接入
+
+项目里现在已经有一层只读 SQLite 查询仓库：
+
+- 头文件：`include/db/official_data_repository.h`
+- 实现：`src/db/official_data_repository.cpp`
+
+这层目前只提供固定查询接口，不开放任意 SQL：
+
+- 初始化只读库连接
+- 按技能 ID 查询技能静态信息和拆分后的效果参数
+- 按精灵 ID / 精灵准确名字查询基础信息与可学技能
+
+设计目标是先服务战斗引擎初始化和 `Skills::loadSkills()`，避免过早引入通用 ORM 或过重的数据库抽象层。
 
 ## 许可证
 本项目采用MIT许可证，详情请参阅`LICENSE`文件。

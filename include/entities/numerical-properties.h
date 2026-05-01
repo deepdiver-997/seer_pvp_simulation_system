@@ -4,7 +4,7 @@
 #include <stdexcept>
 
 enum class NumericalPropertyIndex {
-    ATTACK = 0,
+    PHYSICAL_ATTACK = 0,
     SPECIAL_ATTACK = 1,
     DEFENSE = 2,
     SPECIAL_DEFENSE = 3,
@@ -26,7 +26,8 @@ public:
     mutable int arr[6] = {0};   // 0:attack 1:specialAttack 2:defense 3:specialDefense 4:speed 5:hp
     numerical_properties();
     ~numerical_properties();
-    int & operator[](int index)const {
+    int & operator[](NumericalPropertyIndex i)const {
+        int index = static_cast<int>(i);
         if (index < 0 || index >= 6) {
             throw std::out_of_range("Index out of range");
         }

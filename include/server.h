@@ -9,6 +9,7 @@
 #include <fsm/iControlBlock.h>
 #include <fsm/battleFsm.h>
 #include <entities/seer-robot.h>
+#include <entities/pet_factory.h>
 
 class Server {
 public:
@@ -19,13 +20,11 @@ public:
     void stop();
 
     // 处理单连接训练模式
-    void handle_training_connection(std::unique_ptr<boost::asio::ip::tcp::socket> socket,
-                                   const SeerRobot robots[2]);
+    void handle_training_connection(std::unique_ptr<boost::asio::ip::tcp::socket> socket);
 
     // 处理双连接对战模式
     void handle_battle_connection(std::unique_ptr<boost::asio::ip::tcp::socket> socket1,
-                                 std::unique_ptr<boost::asio::ip::tcp::socket> socket2,
-                                 const SeerRobot robots[2]);
+                                 std::unique_ptr<boost::asio::ip::tcp::socket> socket2);
 
     int next_match_id() { return next_match_id_++; }
 

@@ -1,80 +1,157 @@
 #ifndef ELF_PET_H
 #define ELF_PET_H
 
+#include <array>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
-#include <abnormal-system/abnormal-state.h>
-
-#include <entities/soul_mark.h>
 #include <entities/elemental-attributes.h>
+#include <entities/mark.h>
 #include <entities/numerical-properties.h>
 #include <entities/skills.h>
-#include <entities/mark.h>
+#include <entities/soul_mark.h>
+
+enum class Gender {
+    MALE = 0,
+    FEMALE = 1,
+    NONE = 2
+};
 
 class ElfPet {
 public:
-    ElfPet() = delete; // Deleting default constructor to prevent instantiation without parameters
-    ElfPet(int id, const std::string& name, int element1, int element2, int soulSeal, const numerical_properties& numProps, int hp, const int level[6], int shield, int cover, bool is_locked, const Skills skills[5])
-        : id(id), name(name), soulSeal(soulSeal), numericalProperties(numProps), hp(hp), shield(shield), cover(cover), is_locked(is_locked), soulMark(soulSeal, "", "")
-    {
-        elementalAttributes[0] = element1;
-        elementalAttributes[1] = element2;
-        if (level)
-        for (int i = 0; i < 6; ++i) {
-            this->level[i] = level[i];
-        }
-        if (skills)
-            for (int i = 0; i < 5; ++i) {
-                this->skills[i] = skills[i];
-            }
-        else
-            throw std::invalid_argument("Skills array cannot be null");
+    ElfPet() = delete;
+
+    ElfPet(int id,
+           std::string name,
+           std::array<int, 2> elemental_attributes,
+           int soul_seal,
+           Gender gender,
+           SoulMark soul_mark,
+           numerical_properties numerical_base,
+           int initial_hp,
+           std::array<int, 6> levels,
+           int shield,
+           int cover,
+           bool is_locked,
+           std::array<Skills, 5> skills)
+        : elementalAttributes(std::move(elemental_attributes))
+        , soulSeal(soul_seal)
+        , gender(gender)
+        , soulMark(std::move(soul_mark))
+        , numericalBase(numerical_base)
+        , numericalProperties(numerical_base)
+        , hp(numericalProperties[NumericalPropertyIndex::HP])
+        , levels(std::move(levels))
+        , speed_priority(0)
+        , shield(shield)
+        , cover(cover)
+        , is_locked(is_locked)
+        , skills(std::move(skills))
+        , id(id)
+        , name(std::move(name)) {
+        hp = initial_hp;
     }
+
+    ElfPet(const ElfPet& other)
+        : elementalAttributes(other.elementalAttributes)
+        , soulSeal(other.soulSeal)
+        , gender(other.gender)
+        , soulMark(other.soulMark)
+        , numericalBase(other.numericalBase)
+        , numericalProperties(other.numericalProperties)
+        , hp(numericalProperties[NumericalPropertyIndex::HP])
+        , levels(other.levels)
+        , speed_priority(other.speed_priority)
+        , shield(other.shield)
+        , cover(other.cover)
+        , is_locked(other.is_locked)
+        , skills(other.skills)
+        , marks(other.marks)
+        , id(other.id)
+        , name(other.name) {}
+
+    ElfPet(ElfPet&& other) noexcept
+        : elementalAttributes(std::move(other.elementalAttributes))
+        , soulSeal(other.soulSeal)
+        , gender(other.gender)
+        , soulMark(std::move(other.soulMark))
+        , numericalBase(other.numericalBase)
+        , numericalProperties(other.numericalProperties)
+        , hp(numericalProperties[NumericalPropertyIndex::HP])
+        , levels(std::move(other.levels))
+        , speed_priority(other.speed_priority)
+        , shield(other.shield)
+        , cover(other.cover)
+        , is_locked(other.is_locked)
+        , skills(std::move(other.skills))
+        , marks(std::move(other.marks))
+        , id(other.id)
+        , name(std::move(other.name)) {}
+
+    ElfPet& operator=(const ElfPet& other) {
+        if (this == &other) {
+            return *this;
+        }
+        elementalAttributes = other.elementalAttributes;
+        soulSeal = other.soulSeal;
+        gender = other.gender;
+        soulMark = other.soulMark;
+        numericalBase = other.numericalBase;
+        numericalProperties = other.numericalProperties;
+        levels = other.levels;
+        speed_priority = other.speed_priority;
+        shield = other.shield;
+        cover = other.cover;
+        is_locked = other.is_locked;
+        skills = other.skills;
+        marks = other.marks;
+        id = other.id;
+        name = other.name;
+        return *this;
+    }
+
+    ElfPet& operator=(ElfPet&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        elementalAttributes = std::move(other.elementalAttributes);
+        soulSeal = other.soulSeal;
+        gender = other.gender;
+        soulMark = std::move(other.soulMark);
+        numericalBase = other.numericalBase;
+        numericalProperties = other.numericalProperties;
+        levels = std::move(other.levels);
+        speed_priority = other.speed_priority;
+        shield = other.shield;
+        cover = other.cover;
+        is_locked = other.is_locked;
+        skills = std::move(other.skills);
+        marks = std::move(other.marks);
+        id = other.id;
+        name = std::move(other.name);
+        return *this;
+    }
+
     ~ElfPet() = default;
-    int getTempAbilityValue(int index) const {
-        if (index < 0 || index >= 6) {
-            throw std::out_of_range("Index out of range");
-        }
-        if (level[index] < -6 || level[index] > 6) {
-            throw std::out_of_range("Level out of range");
-        }
-        if (level[index] >= 0) {
-            return numericalProperties[index] * ((level[index] + 2) / 2.0);
-        }
-        if (index == 5 && level[index] >= -6) {
-            // return Cm * 100
-            switch (level[index]) {
-                case -1: return 85;
-                case -2: return 70;
-                case -3: return 55;
-                case -4: return 45;
-                case -5: return 35;
-                case -6: return 25;
-            }
-        }
-        return numericalProperties[index] * (2.0 / (2 + level[index]));
-    }
 
-// private:
-    int elementalAttributes[2]; //元素属性
-    int soulSeal;
+    std::array<int, 2> elementalAttributes{};
+    int soulSeal = 0;
+    Gender gender = Gender::NONE;
     SoulMark soulMark;
-    numerical_properties numericalProperties;   // 对局外的数值属性
-    int hp;          // Health Points
-    int level[6];   //攻击，防御，特攻，特防，速度，命中
-    int speed_priority; //速度优先级    0~5 必先 >=6 正常
-    int shield;    //当前护盾值
-    int cover;    //当前护罩值
-    bool is_locked; //是否被封印
-    Skills skills[5];
-    std::vector<AbnormalState> abnormalStates; // Vector to hold abnormal states
-    std::vector<std::unique_ptr<Mark>> marks; // Vector to hold marks
+    numerical_properties numericalBase, numericalProperties;
+    int& hp = numericalProperties[NumericalPropertyIndex::HP];
+    std::array<int, 6> levels{};
+    int speed_priority = 0;
+    int shield = 0;
+    int cover = 0;
+    bool is_locked = false;
+    std::array<Skills, 5> skills;
+    std::vector<Mark> marks;
 
-    int id;
+    int id = -1;
     std::string name;
 };
-
-
 
 #endif // ELF_PET_H
