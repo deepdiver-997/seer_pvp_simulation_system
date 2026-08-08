@@ -149,3 +149,49 @@ BreakResult break_round_effects(BattleContext* ctx, int target) {
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_BREAK, ctx->opponent(target), target});
     return BreakResult::SUCCESS;
 }
+
+// ----------------------------------------------------------------
+// deal_damage — 伤害原语（统一伤害入口）
+//
+// 流程：护盾吸收（按优先级）→ 扣血 → emit EVENT_TAKE_DAMAGE。
+// 护盾被击破时 emit EVENT_SHIELD_BROKEN（对应描述"护盾消失时XXX"）。
+// 所有伤害类机制都应走这里，避免效果函数直接改 hp 绕过管线。
+// ----------------------------------------------------------------
+void deal_damage(BattleContext* ctx, int target, int amount,
+                 DamageKind kind, int actor) {
+    if (target < 0 || target > 1 || amount <= 0) {
+        return;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    if (pet.hp <= 0) {
+        return;  // 目标已死亡
+    }
+
+    int effective = amount;
+    if (kind == DamageKind::PERCENT) {
+        const int max_hp = pet.numericalBase[NumericalPropertyIndex::HP];
+        effective = max_hp > 0 ? max_hp * amount / 100 : 0;
+        if (effective <= 0) {
+            return;
+        }
+    }
+
+    // 护盾吸收（按优先级从高到低），记录破盾数
+    int broken = 0;
+    const int remaining = pet.shield_bank_.absorb(effective, &broken);
+    if (broken > 0) {
+        ctx->event_center_.emit(BattleEvent{EventType::EVENT_SHIELD_BROKEN, actor, target});
+    }
+    if (remaining <= 0) {
+        return;  // 护盾完全挡下
+    }
+
+    // 扣血
+    pet.hp -= remaining;
+    if (pet.hp < 0) {
+        pet.hp = 0;
+    }
+
+    // 受到伤害事件（第三方"当受到伤害时XXX"监听）
+    ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target});
+}

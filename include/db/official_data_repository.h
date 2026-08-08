@@ -31,6 +31,7 @@ struct SkillRecord {
     int priority = 0;
     int max_pp = 0;
     int cd = 0;
+    int must_hit = 0;   // 官方 MustHit：1 = 必中（无视命中率）
     std::vector<SkillEffectRecord> effects;
 };
 

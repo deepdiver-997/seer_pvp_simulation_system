@@ -177,7 +177,8 @@ std::optional<SkillRecord> OfficialDataRepository::load_skill(int move_id) const
     Statement stmt(
         db_,
         "SELECT id, name, type_id, category, power, accuracy, COALESCE(priority, 0), "
-        "COALESCE(max_pp, 0), COALESCE(cd, 0), COALESCE(side_effect, ''), COALESCE(side_effect_arg, '') "
+        "COALESCE(max_pp, 0), COALESCE(cd, 0), COALESCE(must_hit, 0), "
+        "COALESCE(side_effect, ''), COALESCE(side_effect_arg, '') "
         "FROM moves WHERE id = ?1"
     );
     if (!stmt || !bind_int(stmt.get(), 1, move_id)) {
@@ -199,7 +200,8 @@ std::optional<SkillRecord> OfficialDataRepository::load_skill(int move_id) const
     skill.priority = sqlite3_column_int(stmt.get(), 6);
     skill.max_pp = sqlite3_column_int(stmt.get(), 7);
     skill.cd = sqlite3_column_int(stmt.get(), 8);
-    skill.effects = build_skill_effects(db_, column_text(stmt.get(), 9), column_text(stmt.get(), 10));
+    skill.must_hit = sqlite3_column_int(stmt.get(), 9);
+    skill.effects = build_skill_effects(db_, column_text(stmt.get(), 10), column_text(stmt.get(), 11));
     return skill;
 }
 

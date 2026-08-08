@@ -23,6 +23,7 @@ enum class EventType {
     EVENT_ANOMALY_APPLIED,   // 任意异常施加成功
     EVENT_HIT,               // 攻击命中
     EVENT_TAKE_DAMAGE,       // 受到伤害结算后
+    EVENT_SHIELD_BROKEN,     // 护盾被击破（护盾消失时触发）
     EVENT_ENTER_STAGE,       // 上场
     EVENT_SWAP,              // 换宠
     EVENT_OPPONENT_DEFEATED, // 击败对手

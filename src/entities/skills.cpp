@@ -78,6 +78,7 @@ bool Skills::loadSkills() {
     type = map_skill_type(record->category);
     power = record->power;
     accuracy = record->accuracy;
+    must_hit = record->must_hit != 0;
     priority = record->priority;
     maxPP = record->max_pp;
     pp = record->max_pp;

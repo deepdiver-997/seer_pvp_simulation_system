@@ -93,6 +93,7 @@ public:
     SkillType type;
     int power;
     int accuracy;
+    bool must_hit = false;   // 必中：命中结算无视命中率
     float critical_strike_rate;
     int priority;   // 先制等级：官方 priority + 本地调整值，数值越大越先行动
     int element[2];  // 元素属性

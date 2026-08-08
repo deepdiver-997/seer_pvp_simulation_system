@@ -78,4 +78,30 @@ enum class BreakResult {
  */
 BreakResult break_round_effects(BattleContext* ctx, int target);
 
+// ----------------------------------------------------------------
+// 伤害
+// ----------------------------------------------------------------
+enum class DamageKind {
+    NORMAL,   // 普通攻击伤害（吃护盾）
+    FIXED,    // 固定伤害（吃护盾）
+    PERCENT,  // 百分比伤害（占目标最大体力百分比，吃护盾）
+    TRUE,     // 真实伤害（吃护盾）
+};
+
+/**
+ * deal_damage - 伤害原语：统一伤害入口。
+ *
+ * 流程：护盾吸收（按优先级）→ 扣血 → emit EVENT_TAKE_DAMAGE。
+ * 护盾被击破时 emit EVENT_SHIELD_BROKEN。
+ * 所有伤害类机制（攻击管线、效果、固定/百分比伤害）都应走这里，
+ * 避免效果函数直接改 hp 绕过管线。
+ *
+ * @param target 承受方 (0/1)
+ * @param amount 伤害量；PERCENT 时为占最大体力的百分比
+ * @param kind   伤害类型
+ * @param actor  施放方（未知传 -1）
+ */
+void deal_damage(BattleContext* ctx, int target, int amount,
+                 DamageKind kind = DamageKind::NORMAL, int actor = -1);
+
 #endif // BATTLE_PRIMITIVES_H

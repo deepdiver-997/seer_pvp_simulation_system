@@ -3,6 +3,7 @@
 #include <fsm/iControlBlock.h>
 #include <effects/continuousEffect.h>
 #include <numerical-calculation/calculation.h>
+#include <primitives/battle_primitives.h>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -231,10 +232,10 @@ void apply_resolved_damage(BattleContext* ctx) {
 
     ElfPet& defender = ctx->seerRobot[damage.defenderId].elfPets[ctx->on_stage[damage.defenderId]];
     const int hp_before = defender.hp;
-    defender.hp -= damage.final;
-    if (defender.hp < 0) {
-        defender.hp = 0;
-    }
+    // 统一走伤害原语：护盾吸收 + EVENT_TAKE_DAMAGE（护盾被击破发 EVENT_SHIELD_BROKEN）
+    const DamageKind kind = damage.isTrueDamage ? DamageKind::TRUE
+                         : (damage.isFixed ? DamageKind::FIXED : DamageKind::NORMAL);
+    deal_damage(ctx, damage.defenderId, damage.final, kind, damage.attackerId);
 
     const int attacker_id = damage.attackerId;
     const int defender_id = damage.defenderId;

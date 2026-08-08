@@ -142,6 +142,11 @@ bool SkillExecutionEffect::calculateHit(BattleContext* ctx, int attackerId, int 
     ElfPet& attacker = ctx->seerRobot[attackerId].elfPets[ctx->on_stage[attackerId]];
     Skills& skill = attacker.skills[skillIndex];
 
+    // 必中技能无视命中率（官方 MustHit=1，约 10948 个技能）
+    if (skill.must_hit) {
+        return true;
+    }
+
     int accuracy = skill.accuracy;
     float dodgeChance = ctx->ws.dodge_rate[1 - attackerId];
     int hitChance = accuracy - static_cast<int>(dodgeChance * 100);
