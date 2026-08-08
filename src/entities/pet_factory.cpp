@@ -1,6 +1,7 @@
 #include <entities/pet_factory.h>
 
 #include <effects/effect.h>
+#include <entities/elemental-attributes.h>
 #include <entities/soul_mark_manager.h>
 
 #include <algorithm>
@@ -81,6 +82,9 @@ bool PetFactory::initialize_runtime_data(const std::string& db_path) {
         std::cerr << "Error: " << official_data::OfficialDataStore::instance().repository().last_error() << std::endl;
         return false;
     }
+
+    // 加载官方克制表（types_relation）到 ElementalAttributes 矩阵。
+    ElementalAttributes().loadElementalAttributes();
 
     // Ensure effect plugins are loaded before any skill/soulmark cloning happens.
     EffectFactory::getInstance("resources/moves_lib");

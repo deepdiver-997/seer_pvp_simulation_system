@@ -54,6 +54,60 @@ std::vector<int> parse_int_list(const std::string& raw) {
     return values;
 }
 
+// 解析官方 JSON 数组文本（如 "[5, 15, -1]"、"[]"）为 int 列表。
+// 官方 moves.side_effect / side_effect_arg 是数组，C++ 侧做轻量解析。
+std::vector<int> parse_json_int_array(const std::string& raw) {
+    std::vector<int> values;
+    std::size_t i = 0;
+    const std::size_t n = raw.size();
+    while (i < n) {
+        const char ch = raw[i];
+        if (ch == '-' || std::isdigit(static_cast<unsigned char>(ch))) {
+            const bool negative = (ch == '-');
+            if (negative) {
+                ++i;
+            }
+            long value = 0;
+            bool any = false;
+            while (i < n && std::isdigit(static_cast<unsigned char>(raw[i]))) {
+                value = value * 10 + (raw[i] - '0');
+                ++i;
+                any = true;
+            }
+            if (any) {
+                values.push_back(negative ? -static_cast<int>(value) : static_cast<int>(value));
+            }
+        } else {
+            ++i;
+        }
+    }
+    return values;
+}
+
+// 解析官方 JSON 字符串数组（如 "[\"grass\", \"fight\"]"）为字符串列表。
+std::vector<std::string> parse_json_string_array(const std::string& raw) {
+    std::vector<std::string> values;
+    std::size_t i = 0;
+    const std::size_t n = raw.size();
+    while (i < n) {
+        if (raw[i] == '"') {
+            std::string token;
+            ++i;
+            while (i < n && raw[i] != '"') {
+                token += raw[i];
+                ++i;
+            }
+            values.push_back(std::move(token));
+            if (i < n) {
+                ++i;  // 跳过结尾引号
+            }
+        } else {
+            ++i;
+        }
+    }
+    return values;
+}
+
 std::string column_text(sqlite3_stmt* stmt, int column) {
     const unsigned char* text = sqlite3_column_text(stmt, column);
     return text ? reinterpret_cast<const char*>(text) : std::string{};
@@ -101,8 +155,8 @@ std::vector<SkillEffectRecord> build_skill_effects(
     const std::string& side_effect_raw,
     const std::string& side_effect_arg_raw
 ) {
-    const std::vector<int> effect_ids = parse_int_list(side_effect_raw);
-    const std::vector<int> flat_args = parse_int_list(side_effect_arg_raw);
+    const std::vector<int> effect_ids = parse_json_int_array(side_effect_raw);
+    const std::vector<int> flat_args = parse_json_int_array(side_effect_arg_raw);
     std::vector<SkillEffectRecord> effects;
     effects.reserve(effect_ids.size());
 
@@ -166,6 +220,8 @@ void OfficialDataRepository::close() {
         db_ = nullptr;
     }
     db_path_.clear();
+    type_components_cache_loaded_ = false;
+    type_components_cache_.clear();
 }
 
 std::optional<SkillRecord> OfficialDataRepository::load_skill(int move_id) const {
@@ -177,7 +233,7 @@ std::optional<SkillRecord> OfficialDataRepository::load_skill(int move_id) const
     Statement stmt(
         db_,
         "SELECT id, name, type_id, category, power, accuracy, COALESCE(priority, 0), "
-        "COALESCE(max_pp, 0), COALESCE(cd, 0), COALESCE(must_hit, 0), "
+        "COALESCE(max_pp, 0), COALESCE(must_hit, 0), "
         "COALESCE(side_effect, ''), COALESCE(side_effect_arg, '') "
         "FROM moves WHERE id = ?1"
     );
@@ -199,9 +255,8 @@ std::optional<SkillRecord> OfficialDataRepository::load_skill(int move_id) const
     skill.accuracy = sqlite3_column_int(stmt.get(), 5);
     skill.priority = sqlite3_column_int(stmt.get(), 6);
     skill.max_pp = sqlite3_column_int(stmt.get(), 7);
-    skill.cd = sqlite3_column_int(stmt.get(), 8);
-    skill.must_hit = sqlite3_column_int(stmt.get(), 9);
-    skill.effects = build_skill_effects(db_, column_text(stmt.get(), 10), column_text(stmt.get(), 11));
+    skill.must_hit = sqlite3_column_int(stmt.get(), 8);
+    skill.effects = build_skill_effects(db_, column_text(stmt.get(), 9), column_text(stmt.get(), 10));
     return skill;
 }
 
@@ -219,7 +274,7 @@ std::optional<int> OfficialDataRepository::find_monster_id_by_exact_name(const s
     Statement stmt(
         db_,
         "SELECT id FROM monsters "
-        "WHERE json_extract(raw_json, '$.DefName') = ?1 "
+        "WHERE json_extract(raw_json, '$.def_name') = ?1 "
         "LIMIT 1"
     );
     if (!stmt || !bind_text(stmt.get(), 1, trim(monster_name))) {
@@ -242,11 +297,9 @@ std::vector<LearnableMoveRecord> OfficialDataRepository::load_monster_learnable_
 
     Statement stmt(
         db_,
-        "SELECT "
-        "json_extract(json_each.value, '$.ID') AS move_id, "
-        "COALESCE(json_extract(json_each.value, '$.LearningLv'), 0) AS learning_lv "
-        "FROM monsters, json_each(monsters.raw_json, '$.LearnableMoves.Move') "
-        "WHERE monsters.id = ?1 "
+        "SELECT move_id, learning_lv "
+        "FROM monster_learnable_moves "
+        "WHERE monster_id = ?1 "
         "ORDER BY learning_lv ASC, move_id ASC"
     );
     if (!stmt || !bind_int(stmt.get(), 1, monster_id)) {
@@ -274,17 +327,16 @@ std::optional<MonsterRecord> OfficialDataRepository::load_monster(int monster_id
         db_,
         "SELECT "
         "id, "
-        "COALESCE(json_extract(raw_json, '$.DefName'), ''), "
-        "COALESCE(json_extract(raw_json, '$.Type'), 0), "
-        "COALESCE(json_extract(raw_json, '$.Type2'), 0), "
-        "COALESCE(json_extract(raw_json, '$.AddSeParam'), 0), "
-        "COALESCE(json_extract(raw_json, '$.Gender'), 2), "
-        "COALESCE(json_extract(raw_json, '$.HP'), 0), "
-        "COALESCE(json_extract(raw_json, '$.Atk'), 0), "
-        "COALESCE(json_extract(raw_json, '$.Def'), 0), "
-        "COALESCE(json_extract(raw_json, '$.SpAtk'), 0), "
-        "COALESCE(json_extract(raw_json, '$.SpDef'), 0), "
-        "COALESCE(json_extract(raw_json, '$.Spd'), 0) "
+        "COALESCE(json_extract(raw_json, '$.def_name'), ''), "
+        "COALESCE(json_extract(raw_json, '$.type'), 0), "
+        "COALESCE(soul_mark_id, 0), "
+        "COALESCE(json_extract(raw_json, '$.gender'), 2), "
+        "COALESCE(json_extract(raw_json, '$.hp'), 0), "
+        "COALESCE(json_extract(raw_json, '$.atk'), 0), "
+        "COALESCE(json_extract(raw_json, '$.def'), 0), "
+        "COALESCE(json_extract(raw_json, '$.sp_atk'), 0), "
+        "COALESCE(json_extract(raw_json, '$.sp_def'), 0), "
+        "COALESCE(json_extract(raw_json, '$.spd'), 0) "
         "FROM monsters WHERE id = ?1"
     );
     if (!stmt || !bind_int(stmt.get(), 1, monster_id)) {
@@ -299,16 +351,19 @@ std::optional<MonsterRecord> OfficialDataRepository::load_monster(int monster_id
     MonsterRecord monster;
     monster.id = sqlite3_column_int(stmt.get(), 0);
     monster.name = column_text(stmt.get(), 1);
-    monster.type = sqlite3_column_int(stmt.get(), 2);
-    monster.secondary_type = sqlite3_column_int(stmt.get(), 3);
-    monster.soul_mark_id = sqlite3_column_int(stmt.get(), 4);
-    monster.gender = sqlite3_column_int(stmt.get(), 5);
-    monster.hp = sqlite3_column_int(stmt.get(), 6);
-    monster.atk = sqlite3_column_int(stmt.get(), 7);
-    monster.def = sqlite3_column_int(stmt.get(), 8);
-    monster.sp_atk = sqlite3_column_int(stmt.get(), 9);
-    monster.sp_def = sqlite3_column_int(stmt.get(), 10);
-    monster.spd = sqlite3_column_int(stmt.get(), 11);
+    const int raw_type = sqlite3_column_int(stmt.get(), 2);
+    monster.soul_mark_id = sqlite3_column_int(stmt.get(), 3);
+    monster.gender = sqlite3_column_int(stmt.get(), 4);
+    monster.hp = sqlite3_column_int(stmt.get(), 5);
+    monster.atk = sqlite3_column_int(stmt.get(), 6);
+    monster.def = sqlite3_column_int(stmt.get(), 7);
+    monster.sp_atk = sqlite3_column_int(stmt.get(), 8);
+    monster.sp_def = sqlite3_column_int(stmt.get(), 9);
+    monster.spd = sqlite3_column_int(stmt.get(), 10);
+    // 新 Unity 结构：双属性精灵 type 用合并 id，分解为两个单属性 id。
+    const std::pair<int, int> components = decompose_type(raw_type);
+    monster.type = components.first;
+    monster.secondary_type = components.second;
     monster.learnable_moves = load_monster_learnable_moves(monster.id);
     return monster;
 }
@@ -329,7 +384,7 @@ std::optional<SoulMarkRecord> OfficialDataRepository::load_soul_mark(int soul_ma
 
     Statement stmt(
         db_,
-        "SELECT idx, stat, effect_id, COALESCE(args, ''), COALESCE(can_reset, 0), "
+        "SELECT idx, stat, effect_id, COALESCE(args, ''), "
         "COALESCE(desc, ''), COALESCE(intro, ''), COALESCE(star_level, 0) "
         "FROM new_se WHERE idx = ?1"
     );
@@ -346,11 +401,118 @@ std::optional<SoulMarkRecord> OfficialDataRepository::load_soul_mark(int soul_ma
     record.stat = sqlite3_column_int(stmt.get(), 1);
     record.effect_id = sqlite3_column_int(stmt.get(), 2);
     record.args = parse_int_list(column_text(stmt.get(), 3));
-    record.can_reset = sqlite3_column_int(stmt.get(), 4);
-    record.description = column_text(stmt.get(), 5);
-    record.intro = column_text(stmt.get(), 6);
-    record.star_level = sqlite3_column_int(stmt.get(), 7);
+    record.can_reset = 0;  // 新 Unity 数据无 CanReset 字段
+    record.description = column_text(stmt.get(), 4);
+    record.intro = column_text(stmt.get(), 5);
+    record.star_level = sqlite3_column_int(stmt.get(), 6);
     return record;
+}
+
+void OfficialDataRepository::ensure_type_components_cache() const {
+    if (type_components_cache_loaded_ || !db_) {
+        return;
+    }
+    type_components_cache_loaded_ = true;
+
+    // en 名 -> 单属性 id（如 "grass" -> 1）。仅单元素数组为单属性。
+    std::unordered_map<std::string, int> name_to_id;
+    std::vector<std::pair<int, std::pair<std::string, std::string>>> pending_combined;
+
+    Statement stmt(db_, "SELECT id, en FROM skill_types");
+    if (!stmt) {
+        return;
+    }
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        const int id = sqlite3_column_int(stmt.get(), 0);
+        const std::vector<std::string> names = parse_json_string_array(column_text(stmt.get(), 1));
+        if (names.size() == 1) {
+            type_components_cache_[id] = {id, 0};
+            name_to_id[names[0]] = id;
+        } else if (names.size() == 2) {
+            pending_combined.emplace_back(id, std::make_pair(names[0], names[1]));
+        }
+    }
+
+    for (const auto& [id, names] : pending_combined) {
+        const int a = name_to_id.count(names.first) ? name_to_id.at(names.first) : 0;
+        const int b = name_to_id.count(names.second) ? name_to_id.at(names.second) : 0;
+        type_components_cache_[id] = {a, b};
+    }
+}
+
+std::pair<int, int> OfficialDataRepository::decompose_type(int type_id) const {
+    ensure_type_components_cache();
+    const auto it = type_components_cache_.find(type_id);
+    if (it == type_components_cache_.end()) {
+        return {type_id, 0};
+    }
+    return it->second;
+}
+
+bool OfficialDataRepository::load_elemental_restraints(
+    std::vector<std::vector<int>>& matrix
+) const {
+    if (!db_) {
+        last_error_ = "database is not open";
+        return false;
+    }
+
+    // en 名 -> 单属性 id（克制表用 en 名作外键，需映射回 skill_types.id）。
+    std::unordered_map<std::string, int> name_to_id;
+    {
+        Statement stmt(
+            db_,
+            "SELECT id, en FROM skill_types WHERE json_array_length(en) = 1"
+        );
+        if (!stmt) {
+            last_error_ = sqlite3_errmsg(db_);
+            return false;
+        }
+        while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+            const int id = sqlite3_column_int(stmt.get(), 0);
+            const std::vector<std::string> names =
+                parse_json_string_array(column_text(stmt.get(), 1));
+            if (names.size() == 1) {
+                name_to_id[names[0]] = id;
+            }
+        }
+    }
+
+    Statement stmt(
+        db_,
+        "SELECT attacker_type, defender_type, multiple FROM types_relation"
+    );
+    if (!stmt) {
+        last_error_ = sqlite3_errmsg(db_);
+        return false;
+    }
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        const std::string attacker = column_text(stmt.get(), 0);
+        const std::string defender = column_text(stmt.get(), 1);
+        const double multiple = sqlite3_column_double(stmt.get(), 2);
+
+        const auto ait = name_to_id.find(attacker);
+        const auto dit = name_to_id.find(defender);
+        if (ait == name_to_id.end() || dit == name_to_id.end()) {
+            continue;
+        }
+        const int attacker_id = ait->second;
+        const int defender_id = dit->second;
+        if (attacker_id < 0 || defender_id < 0 ||
+            attacker_id >= static_cast<int>(matrix.size()) ||
+            defender_id >= static_cast<int>(matrix[static_cast<std::size_t>(attacker_id)].size())) {
+            continue;
+        }
+        // 官方倍率 {0.0, 0.5, 1.0, 2.0} -> 引擎语义 {0=微弱/免疫, 1=普通, 2=克制}
+        int encoded = 1;
+        if (multiple >= 1.5) {
+            encoded = 2;
+        } else if (multiple < 0.75) {
+            encoded = 0;
+        }
+        matrix[static_cast<std::size_t>(attacker_id)][static_cast<std::size_t>(defender_id)] = encoded;
+    }
+    return true;
 }
 
 OfficialDataStore& OfficialDataStore::instance() {

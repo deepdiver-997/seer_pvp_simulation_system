@@ -3,13 +3,15 @@
 
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct sqlite3;
 
 namespace official_data {
 
-inline constexpr const char* kDefaultOfficialDatabasePath = "scripts/data/processed/seer_official.sqlite";
+inline constexpr const char* kDefaultOfficialDatabasePath = "scripts/data/processed/seer_unity.sqlite";
 
 struct SkillEffectRecord {
     int effect_id = -1;
@@ -90,10 +92,20 @@ public:
     std::vector<LearnableMoveRecord> load_monster_learnable_moves(int monster_id) const;
     std::optional<SoulMarkRecord> load_soul_mark(int soul_mark_id) const;
 
+    // 从 types_relation（官方克制表）填充克制矩阵。
+    // matrix[attacker_type_id][defender_type_id] ∈ {0, 1, 2}（0=微弱/免疫, 1=普通, 2=克制）。
+    bool load_elemental_restraints(std::vector<std::vector<int>>& matrix) const;
+
 private:
+    // 新 Unity 结构：双属性精灵 type 用合并 id（如 41=战斗地面），需分解为两个单属性 id。
+    void ensure_type_components_cache() const;
+    std::pair<int, int> decompose_type(int type_id) const;
+
     sqlite3* db_ = nullptr;
     std::string db_path_;
     mutable std::string last_error_;
+    mutable bool type_components_cache_loaded_ = false;
+    mutable std::unordered_map<int, std::pair<int, int>> type_components_cache_;
 };
 
 class OfficialDataStore {
