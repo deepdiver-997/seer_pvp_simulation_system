@@ -135,6 +135,10 @@ bool SkillExecutionEffect::operator()(BattleContext* ctx) {
     applySkillResult(SkillExecResult::HIT);
     registerBranch(ctx, SkillExecResult::HIT, skill);
 
+    // 技能命中事件（"技能命中后/受到攻击后"监听；属性技能也算命中，但无伤害量）
+    // 伤害量见 EVENT_TAKE_DAMAGE（deal_damage 发出）
+    ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner_, ctx->opponent(owner_)});
+
     return true;
 }
 

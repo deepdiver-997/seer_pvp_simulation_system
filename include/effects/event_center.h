@@ -31,12 +31,16 @@ enum class EventType {
 
 /**
  * BattleEvent - 事件载荷
- * actor = 发起方，target = 承受方。payload 先最小化，随需要以数据扩展。
+ * actor = 发起方，target = 承受方。amount 按事件类型带语义：
+ *   - EVENT_TAKE_DAMAGE / EVENT_HIT：伤害量（受高伤/受低伤判断用）
+ *   - 其余事件：可忽略
+ * payload 先最小化，随需要以数据扩展。
  */
 struct BattleEvent {
     EventType type;
     int actor = -1;
     int target = -1;
+    int amount = 0;
 };
 
 /**

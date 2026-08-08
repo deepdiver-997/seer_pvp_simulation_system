@@ -19,6 +19,7 @@
 #include <effects/pendingEffect.h>
 #include <effects/event_center.h>
 #include <effects/immunity_center.h>
+#include <effects/damage_pipeline.h>
 #include <entities/soul_mark.h>
 
 // Forward declarations
@@ -183,6 +184,11 @@ public:
     // 免疫源经 grant_immunity / revoke_immunity 管理，独立于效果桶（天然不可被断）。
     ImmunityCenter immunity_center_;
 
+    //--- 伤害修正管线 ---
+    // 伤害值在 resolvedDamage 中流经 DamagePhase 节点，各阶段效果读写它。
+    // 类别抑制（damage_suppress_mask）按效果类别跳过被抑制方的伤害效果。
+    DamagePipeline damage_pipeline_;
+
     //--- 技能效果执行表 ---
     std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>> skills_effects;
 
@@ -287,6 +293,7 @@ public:
         active_round_effects[1] = 0;
         event_center_.clear_all();
         immunity_center_.clear_all();
+        damage_pipeline_.clear();
     }
 
     //--- 回合类效果管理 ---
@@ -354,6 +361,18 @@ public:
      */
     bool is_immune(int owner, ImmunityType type, State timing, int status_id = 0) const {
         return immunity_center_.is_immune(owner, type, state_coverage_bit(timing), roundCount, status_id);
+    }
+
+    //--- 伤害管线便利方法 ---
+
+    /**
+     * 注册一个伤害修正效果到指定阶段。
+     * fn 通过 ctx->resolvedDamage 读取/修改当前伤害值（resolvedDamage.final）。
+     * 被抑制的类别（所属方 damage_suppress_mask）在 walk 时自动跳过。
+     */
+    void register_damage_effect(DamagePhase phase, int owner, DamageEffectCategory category,
+                                std::function<void(BattleContext*, int)> fn) {
+        damage_pipeline_.register_effect(phase, owner, category, std::move(fn));
     }
 
     /**

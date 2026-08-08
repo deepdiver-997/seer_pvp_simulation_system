@@ -23,6 +23,7 @@ set(SIM_CORE_SOURCES
     src/effects/continuousEffect.cpp
     src/effects/effect.cpp
     src/effects/pendingEffect.cpp
+    src/effects/damage_pipeline.cpp
     src/entities/pet_factory.cpp
     src/entities/numerical-properties.cpp
     src/entities/elemental-attributes.cpp

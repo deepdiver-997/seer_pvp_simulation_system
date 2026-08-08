@@ -787,6 +787,8 @@ void BattleFsm::handle_BattleFirstAttackDamage(BattleContext* battleContext) {
 
     stage_simple_attack_damage(battleContext, first_mover_id);
     battleContext->execute_registered_actions(first_mover_id, State::BATTLE_FIRST_ATTACK_DAMAGE);
+    // 伤害修正管线：按 DamagePhase 顺序执行双方伤害效果，读写 resolvedDamage
+    battleContext->damage_pipeline_.run(battleContext, first_mover_id, 1 - first_mover_id);
     apply_resolved_damage(battleContext);
     battleContext->ws.has_attacked[first_mover_id] = true;
     battleContext->ws.skill_used[first_mover_id] = true;
@@ -886,6 +888,8 @@ void BattleFsm::handle_BattleSecondAttackDamage(BattleContext* battleContext) {
 
     stage_simple_attack_damage(battleContext, second_mover_id);
     battleContext->execute_registered_actions(second_mover_id, State::BATTLE_SECOND_ATTACK_DAMAGE);
+    // 伤害修正管线：按 DamagePhase 顺序执行双方伤害效果，读写 resolvedDamage
+    battleContext->damage_pipeline_.run(battleContext, second_mover_id, 1 - second_mover_id);
     apply_resolved_damage(battleContext);
     battleContext->ws.has_attacked[second_mover_id] = true;
     battleContext->ws.skill_used[second_mover_id] = true;

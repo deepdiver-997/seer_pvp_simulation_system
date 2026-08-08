@@ -148,6 +148,7 @@ public:
     int shield = 0;      // 旧字段，暂留（未参与伤害计算）
     int cover = 0;
     ShieldBank shield_bank_;  // 护盾槽（多来源 + 优先级消耗 + 每回合刷新）
+    int damage_suppress_mask = 0;  // 伤害效果抑制掩码（bit = DamageEffectCategory，被抑制类别在管线 walk 时跳过）
     bool is_locked = false;
     std::array<Skills, 5> skills;
     std::vector<Mark> marks;

@@ -187,11 +187,13 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     }
 
     // 扣血
+    const int hp_before = pet.hp;
     pet.hp -= remaining;
     if (pet.hp < 0) {
         pet.hp = 0;
     }
+    const int actual_damage = hp_before - pet.hp;
 
-    // 受到伤害事件（第三方"当受到伤害时XXX"监听）
-    ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target});
+    // 受到伤害事件（第三方"受到攻击伤害后/受高伤/受低伤"监听），amount = 实际扣血
+    ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target, actual_damage});
 }
