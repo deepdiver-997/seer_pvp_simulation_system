@@ -62,6 +62,22 @@ void bind_participants(Effect& effect, int owner) {
     effect.args.refresh_views();
 }
 
+/**
+ * 把 Effect.left_round 转成 ContinuousEffect 的持续回合数。
+ *
+ * - left_round < 0：永久效果（从不按回合过期）。
+ * - left_round == 0：一次性效果（技能效果默认值）。若直接以 0 作为
+ *   duration_rounds_，isExpired 会算出"当前回合 - 注册回合 >= 0"= 立即过期，
+ *   导致效果永不执行。这里归一化为 1：本回合有效，后续回合被 isExpired 拦截
+ *   不重放，并在下个回合扣减点被 cleanup 移除。
+ * - left_round > 0：按原值（N 回合的回合类效果）。
+ */
+int duration_for_effect(int left_round) {
+    if (left_round < 0) return -1;
+    if (left_round == 0) return 1;
+    return left_round;
+}
+
 } // namespace
 
 // ContinuousEffectFromEffect
@@ -164,6 +180,8 @@ void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult re
 
         const State register_state = state_for_owner(node.registerState, owner_, ctx);
         const State pending_observe_state = state_for_owner(node.pendingObserveState, owner_, ctx);
+        // one-shot (left_round==0) 归一化为本回合有效的 1 回合效果，否则立即过期永不执行
+        const int duration = duration_for_effect(effect.left_round);
 
         if (node.usePendingTrigger) {
             ctx->registerPendingEffect(
@@ -174,7 +192,7 @@ void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult re
                     owner_,
                     pending_observe_state,
                     nullptr,
-                    [ctx, owner = owner_, registerState = register_state, effect](BattleContext*) {
+                    [ctx, owner = owner_, registerState = register_state, effect, duration](BattleContext*) {
                         ctx->registerEffect(
                             registerState,
                             owner,
@@ -182,7 +200,7 @@ void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult re
                                 effect,
                                 registerState,
                                 owner,
-                                effect.left_round,
+                                duration,
                                 ctx->roundCount
                             )
                         );
@@ -202,7 +220,7 @@ void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult re
                 effect,
                 register_state,
                 owner_,
-                    effect.left_round,
+                duration,
                 ctx->roundCount
             )
         );

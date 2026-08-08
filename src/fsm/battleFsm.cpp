@@ -470,6 +470,9 @@ bool BattleFsm::runInternal(BattleContext* battleContext) {
         } else {
             trace_fsm(battleContext, "after");
         }
+        // 事件投递点：State 桶执行完后、推进下一个 State 前统一 drain。
+        // 原语成功路径末尾只 emit 入队，由这里投递给 watcher。
+        battleContext->event_center_.drain(battleContext, battleContext->roundCount);
         return false;
     } else {
         std::cerr << "No handler for state: " << static_cast<int>(battleContext->currentState) << std::endl;

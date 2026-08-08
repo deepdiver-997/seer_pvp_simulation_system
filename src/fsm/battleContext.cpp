@@ -265,21 +265,21 @@ void BattleContext::cleanup_expired_effects() {
     cleanup_bucket(skills_effects);
     cleanup_bucket(soul_mark_effects);
 
-    // 清理过期的断回合补偿回调
-    for (int p = 0; p < 2; ++p) {
-        auto& cbs = on_round_broken[p];
-        for (auto it = cbs.begin(); it != cbs.end(); ) {
-            if (it->second.is_expired(roundCount)) {
-                it = cbs.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
+    // 清理过期的断回合补偿 watcher（事件中心统一管理生命周期）
+    event_center_.cleanup(roundCount);
+
+    // 清理窗口已过的免疫 Provider
+    immunity_center_.cleanup(roundCount);
 }
 
 void BattleContext::remove_all_round_effects(int robotId) {
     if (robotId < 0 || robotId > 1) return;
+
+    // 免断检查：目标在当前时点免疫断回合 → 本次断回合无效，不递增版本号、不 emit。
+    // 低级免断只覆盖部分时点，未覆盖时点这里返回 false，照常可断。
+    if (is_immune(robotId, ImmunityType::BREAK, currentState)) {
+        return;
+    }
 
     const bool had_effects = active_round_effects[robotId] > 0;
 
@@ -287,28 +287,32 @@ void BattleContext::remove_all_round_effects(int robotId) {
     ++round_effect_valid_id[robotId];
     active_round_effects[robotId] = 0;
 
-    // 确实断了回合效果时，触发被断方的补偿回调
+    // 成功路径（确实断了回合效果）末尾 emit，由事件中心在 drain 点投递给补偿 watcher
     if (had_effects) {
-        for (auto& [id, cb] : on_round_broken[robotId]) {
-            if (!cb.is_expired(roundCount)) {
-                cb.fn(this);
-            }
-        }
-        on_round_broken[robotId].clear();
+        event_center_.emit(BattleEvent{EventType::EVENT_BREAK, opponent(robotId), robotId});
     }
 }
 
 int BattleContext::register_break_callback(int owner, int duration_rounds,
                                            std::function<void(BattleContext*)> fn) {
     if (owner < 0 || owner > 1) return -1;
-    int id = next_break_callback_id_++;
-    on_round_broken[owner][id] = BreakCallback{roundCount, duration_rounds, std::move(fn)};
-    return id;
+    return event_center_.register_watcher(
+        EventType::EVENT_BREAK,
+        owner,
+        roundCount,        // register_round
+        duration_rounds,   // 0 = 永久
+        /*once=*/true,     // 被断补偿只触发一次，触发后自动移除
+        [fn = std::move(fn), owner](BattleContext* ctx, const BattleEvent& event) {
+            if (event.target != owner) {
+                return;  // 只有自己被断才触发
+            }
+            fn(ctx);
+        });
 }
 
 void BattleContext::remove_break_callback(int owner, int callback_id) {
-    if (owner < 0 || owner > 1) return;
-    on_round_broken[owner].erase(callback_id);
+    (void)owner;  // 兼容层：watcher 自含 owner，注销只需 id
+    event_center_.remove_watcher(callback_id);
 }
 
 

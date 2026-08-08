@@ -38,6 +38,11 @@ struct DamageSnapshot {
  * 所有效果执行都通过 BattleContext.stateEffects 管理，不存在这里。
  */
 struct BattleWorkspace {
+    // 默认构造即零初始化。reset() 原本只靠 BATTLE_ROUND_START 显式调用，
+    // 若在首回合开始前（或未走完整 FSM 时）访问 ws 成员会读到未初始化垃圾
+    // （如 dodge_rate 导致命中判定整数溢出）。构造时调用一次 reset() 兜底。
+    BattleWorkspace() { reset(); }
+
     //========== 操作选择 ==========
     int roundChoice[2][2];     // [方数][操作类型, 参数索引]
     int lastActionType[2];     // 上一次操作类型

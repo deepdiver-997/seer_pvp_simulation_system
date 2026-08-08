@@ -106,9 +106,15 @@ ApplyAnomalyResult apply_anomaly(BattleContext* ctx,
     }
 
     // ----------------------------------------------------------------
-    // [Step 3] 魂免检查 — Mark ID 0
+    // [Step 3] 魂免检查 — 免疫内核 is_immune(ANOMALY) + Mark ID 0 兜底
+    //
+    // 免疫内核统一回答"目标在当前时点是否免疫该异常"：
+    // - 高级魂免 = 全时点覆盖；低级 = 只覆盖部分时点，未覆盖时点这里返回 false。
+    // - anomaly_mask 细分：全免 / 魂免(控制位集合) / 天生免疫具体异常。
+    // Mark ID 0 是旧机制，先保留兜底，后续统一为永久 Provider。
     // ----------------------------------------------------------------
-    if (has_mark(pet.marks, 0)) {
+    if (ctx->is_immune(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id)
+        || has_mark(pet.marks, 0)) {
         return ApplyAnomalyResult::TARGET_IMMUNE;
     }
 

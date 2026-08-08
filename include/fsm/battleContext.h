@@ -10,34 +10,20 @@
 #include <map>
 #include <algorithm>
 #include <mutex>
+#include <initializer_list>
 
 #include <abnormal-system/abnormal-types.h>
 #include <entities/seer-robot.h>
 #include <fsm/battleWorkspace.h>
 #include <effects/continuousEffect.h>
 #include <effects/pendingEffect.h>
+#include <effects/event_center.h>
+#include <effects/immunity_center.h>
 #include <entities/soul_mark.h>
 
 // Forward declarations
 class BattleFsm;
 class IControlBlock;
-
-/**
- * BreakCallback — 被断回合补偿回调
- *
- * 当精灵的回合类效果被对手断回合时触发。
- * 与关联的回合效果同持续回合，但存在独立的 map 中，不受断回合影响。
- * 减扣点时统一清理过期的回调。
- */
-struct BreakCallback {
-    int register_round;                             // 注册时的回合
-    int duration_rounds;                            // 持续回合（和关联的回合效果一致）
-    std::function<void(class BattleContext*)> fn;   // 补偿逻辑
-
-    bool is_expired(int current_round) const {
-        return current_round - register_round >= duration_rounds;
-    }
-};
 
 enum class EffectContainer {
     Skill,
@@ -91,6 +77,23 @@ BATTLE_AFTER_DEFEATING_OPPONENT,           // 击败对手后
 BATTLE_ROUND_COMPLETION,                   // 回合完成
 FINISHED                                   // 战斗结束
 };
+
+//--- 时点覆盖 bitmap 辅助（免疫内核 coverage 用）---
+// State 枚举含 GAME_START = -1，归一化 bit = (int)State + 1。
+// 41 个状态（-1..39）落在 uint64_t 低 40 位内。
+inline uint64_t state_coverage_bit(State s) {
+    return 1ULL << (static_cast<int>(s) + 1);
+}
+inline uint64_t coverage_all() {
+    return ~0ULL;  // 闭环：任何时点都覆盖
+}
+inline uint64_t coverage_union(std::initializer_list<State> states) {
+    uint64_t mask = 0;
+    for (State s : states) {
+        mask |= state_coverage_bit(s);
+    }
+    return mask;
+}
 
 inline const char* state_name_cn(State state) {
     switch (state) {
@@ -170,11 +173,15 @@ public:
     // 断回合时 ++round_effect_valid_id[robotId] 即可使所有旧效果失效
     int round_effect_valid_id[2]{1, 1};  // 从 1 开始，避免和默认初始化的 0 混淆
 
-    //--- 被断回合补偿回调表 ---
-    // key: callback_id（自增分配），value: 回调信息
-    // 断回合时遍历触发未过期的回调，然后清空该玩家的全部回调
-    std::map<int, BreakCallback> on_round_broken[2];
-    int next_break_callback_id_ = 1;
+    //--- 事件通道内核 ---
+    // 全 context 唯一的事件中心。原语成功路径末尾 emit，FSM 在 State 桶后 drain 投递。
+    // 断回合补偿 = 监听 EVENT_BREAK 的 watcher（经 register_break_callback 注册）。
+    EventCenter event_center_;
+
+    //--- 免疫内核 ---
+    // 免断/魂免/免伤/免弱/异常免疫统一查询。断回合、异常施加原语在动作前查 is_immune。
+    // 免疫源经 grant_immunity / revoke_immunity 管理，独立于效果桶（天然不可被断）。
+    ImmunityCenter immunity_center_;
 
     //--- 技能效果执行表 ---
     std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>> skills_effects;
@@ -278,8 +285,8 @@ public:
         pending_effects.clear();
         active_round_effects[0] = 0;
         active_round_effects[1] = 0;
-        on_round_broken[0].clear();
-        on_round_broken[1].clear();
+        event_center_.clear_all();
+        immunity_center_.clear_all();
     }
 
     //--- 回合类效果管理 ---
@@ -297,18 +304,24 @@ public:
      * 断回合 — 移除目标的全部回合类效果
      *
      * O(1) 实现：递增 round_effect_valid_id[robotId] 使所有旧效果失效。
-     * 如果目标确实有回合类效果被断，触发目标注册的 break callback。
+     * 成功路径（目标确实有可断回合效果）末尾 emit EVENT_BREAK，
+     * 由事件中心在 FSM drain 点投递给已注册的补偿 watcher。
      * 注意：Mark ID 0（异常免疫标记）不受断回合影响，它不在效果桶中。
      */
     void remove_all_round_effects(int robotId);
 
     /**
-     * 注册被断回合补偿回调
+     * 注册被断回合补偿回调 —— 事件通道兼容层
      *
-     * @param owner          注册方（被断回合时的补偿触发方）
-     * @param duration_rounds 持续回合（与关联的回合效果一致）
-     * @param fn             补偿逻辑
-     * @return callback_id   用于手动注销
+     * 等价于向事件中心注册一个监听 EVENT_BREAK 的 watcher：
+     * - 只在"自己（owner）被断"（event.target == owner）时触发；
+     * - once 语义：触发一次后自动移除（与被断补偿只触发一次一致）；
+     * - 窗口 = duration_rounds，与关联回合效果一致。
+     *
+     * @param owner           注册方（被断回合时的补偿触发方）
+     * @param duration_rounds 持续回合（0 = 永久）
+     * @param fn              补偿逻辑
+     * @return watcher_id    用于 remove_break_callback 手动注销
      */
     int register_break_callback(int owner, int duration_rounds,
                                 std::function<void(BattleContext*)> fn);
@@ -317,6 +330,31 @@ public:
      * 手动注销被断回合补偿回调
      */
     void remove_break_callback(int owner, int callback_id);
+
+    //--- 免疫内核便利方法 ---
+
+    /**
+     * 授予免疫。coverage 用 state_coverage_bit / coverage_all / coverage_union 构造。
+     * @param source_id 0 = 新建; >0 = 复用更新（快照程序每回合 re-grant 同句柄）
+     * @return source_id（revoke 用）
+     */
+    int grant_immunity(int owner, ImmunityType type, uint64_t coverage,
+                       uint64_t anomaly_mask = 0, int duration_rounds = 0, int source_id = 0) {
+        return immunity_center_.grant(owner, type, coverage, anomaly_mask,
+                                      duration_rounds, roundCount, source_id);
+    }
+
+    void revoke_immunity(int owner, int source_id) {
+        immunity_center_.revoke(owner, source_id);
+    }
+
+    /**
+     * is_immune - 原语在动作前查询"目标在此时点是否免疫该威胁"。
+     * @param status_id ANOMALY 类型专用：被查询的异常状态 id；其余类型忽略
+     */
+    bool is_immune(int owner, ImmunityType type, State timing, int status_id = 0) const {
+        return immunity_center_.is_immune(owner, type, state_coverage_bit(timing), roundCount, status_id);
+    }
 
     /**
      * O(1) 查询目标是否还有回合类效果
