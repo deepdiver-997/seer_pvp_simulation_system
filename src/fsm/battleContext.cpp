@@ -272,25 +272,13 @@ void BattleContext::cleanup_expired_effects() {
     immunity_center_.cleanup(roundCount);
 }
 
-void BattleContext::remove_all_round_effects(int robotId) {
+void BattleContext::invalidate_all_round_effects(int robotId) {
     if (robotId < 0 || robotId > 1) return;
 
-    // 免断检查：目标在当前时点免疫断回合 → 本次断回合无效，不递增版本号、不 emit。
-    // 低级免断只覆盖部分时点，未覆盖时点这里返回 false，照常可断。
-    if (is_immune(robotId, ImmunityType::BREAK, currentState)) {
-        return;
-    }
-
-    const bool had_effects = active_round_effects[robotId] > 0;
-
-    // O(1) 无效化：递增版本号 + 计数器归零
+    // O(1) 无效化：递增版本号 + 计数器归零。
+    // 免疫检查 / 结果判定 / EVENT_BREAK 事件由原语 break_round_effects 负责。
     ++round_effect_valid_id[robotId];
     active_round_effects[robotId] = 0;
-
-    // 成功路径（确实断了回合效果）末尾 emit，由事件中心在 drain 点投递给补偿 watcher
-    if (had_effects) {
-        event_center_.emit(BattleEvent{EventType::EVENT_BREAK, opponent(robotId), robotId});
-    }
 }
 
 int BattleContext::register_break_callback(int owner, int duration_rounds,

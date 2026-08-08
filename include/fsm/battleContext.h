@@ -301,14 +301,14 @@ public:
     void cleanup_expired_effects();
 
     /**
-     * 断回合 — 移除目标的全部回合类效果
+     * 机械无效化目标全部回合类效果（内核操作，O(1)）。
      *
-     * O(1) 实现：递增 round_effect_valid_id[robotId] 使所有旧效果失效。
-     * 成功路径（目标确实有可断回合效果）末尾 emit EVENT_BREAK，
-     * 由事件中心在 FSM drain 点投递给已注册的补偿 watcher。
+     * 递增 round_effect_valid_id[robotId] 使所有旧效果失效并归零计数器。
+     * 免疫检查、结果判定、EVENT_BREAK 事件由原语 break_round_effects
+     * （include/primitives/battle_primitives.h）负责。
      * 注意：Mark ID 0（异常免疫标记）不受断回合影响，它不在效果桶中。
      */
-    void remove_all_round_effects(int robotId);
+    void invalidate_all_round_effects(int robotId);
 
     /**
      * 注册被断回合补偿回调 —— 事件通道兼容层

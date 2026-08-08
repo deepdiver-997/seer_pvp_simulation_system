@@ -40,7 +40,7 @@
 项目中已有此模式的：
 - 异常施加：`apply_anomaly()`
 - 伤害计算：`Calculation::calculateDamage()`
-- 断回合：`remove_all_round_effects()`
+- 断回合：`break_round_effects()`（原语层 `include/primitives/battle_primitives.h`）
 
 尚未统一、值得抽取的：
 - 体力回复（各效果各自操作 `pet.hp`，无统一入口）
@@ -124,7 +124,7 @@ pending_effects[State][side]    → 延迟/观察型效果，满足条件时触�
 | IO 抽象接口 | `include/fsm/iControlBlock.h` |
 | 回合临时数据 | `include/fsm/battleWorkspace.h` |
 | 异常类型定义 | `include/abnormal-system/abnormal-types.h` |
-| 异常统施加入口 | `include/abnormal-system/abnormal-applicator.h` |
+| 原语层（异常施加/断回合等原子动作） | `include/primitives/battle_primitives.h` |
 | 效果基类 | `include/effects/effect.h` |
 | 持续效果 | `include/effects/continuousEffect.h` |
 | 延迟效果 | `include/effects/pendingEffect.h` |

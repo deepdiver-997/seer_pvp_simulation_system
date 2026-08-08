@@ -18,7 +18,7 @@ find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
 set(SIM_CORE_SOURCES
-    src/abnormal-system/abnormal-applicator.cpp
+    src/primitives/battle_primitives.cpp
     src/db/official_data_repository.cpp
     src/effects/continuousEffect.cpp
     src/effects/effect.cpp
