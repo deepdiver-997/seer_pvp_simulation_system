@@ -324,7 +324,7 @@ std::vector<char> build_int_body(const std::vector<int>& values) {
 
 std::vector<char> build_init_012_body() {
     constexpr std::size_t kPartySize = 6;
-    constexpr std::size_t kIntsPerPet = 12;
+    constexpr std::size_t kIntsPerPet = 13;  // pet_id + 5 skills + 6 base + common_trait_id
     std::vector<char> body(kPartySize * 2 * kIntsPerPet * sizeof(std::uint32_t), 0);
 
     const std::array<int, 5> attacker_skills = {10038, 10057, 10001, 10008, 10009};
@@ -347,6 +347,11 @@ std::vector<char> build_init_012_body() {
             std::memcpy(body.data() + cursor, &base, sizeof(base));
             cursor += sizeof(base);
         }
+
+        // common_trait_id = 0（无通用特性）
+        std::uint32_t trait = htonl(0);
+        std::memcpy(body.data() + cursor, &trait, sizeof(trait));
+        cursor += sizeof(trait);
     };
 
     for (std::size_t i = 0; i < kPartySize; ++i) {

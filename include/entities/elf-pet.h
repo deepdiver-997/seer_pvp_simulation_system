@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <entities/common_trait.h>
 #include <entities/elemental-attributes.h>
 #include <entities/mark.h>
 #include <entities/numerical-properties.h>
@@ -30,6 +31,7 @@ public:
            int soul_seal,
            Gender gender,
            SoulMark soul_mark,
+           CommonTrait common_trait,
            numerical_properties numerical_base,
            int initial_hp,
            std::array<int, 6> levels,
@@ -41,6 +43,7 @@ public:
         , soulSeal(soul_seal)
         , gender(gender)
         , soulMark(std::move(soul_mark))
+        , commonTrait(std::move(common_trait))
         , numericalBase(numerical_base)
         , numericalProperties(numerical_base)
         , hp(numericalProperties[NumericalPropertyIndex::HP])
@@ -60,6 +63,7 @@ public:
         , soulSeal(other.soulSeal)
         , gender(other.gender)
         , soulMark(other.soulMark)
+        , commonTrait(other.commonTrait)
         , numericalBase(other.numericalBase)
         , numericalProperties(other.numericalProperties)
         , hp(numericalProperties[NumericalPropertyIndex::HP])
@@ -78,6 +82,7 @@ public:
         , soulSeal(other.soulSeal)
         , gender(other.gender)
         , soulMark(std::move(other.soulMark))
+        , commonTrait(std::move(other.commonTrait))
         , numericalBase(other.numericalBase)
         , numericalProperties(other.numericalProperties)
         , hp(numericalProperties[NumericalPropertyIndex::HP])
@@ -99,6 +104,7 @@ public:
         soulSeal = other.soulSeal;
         gender = other.gender;
         soulMark = other.soulMark;
+        commonTrait = other.commonTrait;
         numericalBase = other.numericalBase;
         numericalProperties = other.numericalProperties;
         levels = other.levels;
@@ -121,6 +127,7 @@ public:
         soulSeal = other.soulSeal;
         gender = other.gender;
         soulMark = std::move(other.soulMark);
+        commonTrait = std::move(other.commonTrait);
         numericalBase = other.numericalBase;
         numericalProperties = other.numericalProperties;
         levels = std::move(other.levels);
@@ -141,6 +148,7 @@ public:
     int soulSeal = 0;
     Gender gender = Gender::NONE;
     SoulMark soulMark;
+    CommonTrait commonTrait;
     numerical_properties numericalBase, numericalProperties;
     int& hp = numericalProperties[NumericalPropertyIndex::HP];
     std::array<int, 6> levels{};

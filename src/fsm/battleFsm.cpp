@@ -199,14 +199,12 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
     DamageSnapshot snapshot;
     snapshot.attackerId = attacker_id;
     snapshot.defenderId = defender_id;
+    // base 为原始伤害；减伤不再在此同步结算，改由 DamagePipeline 的 REDUCE 阶段施加
+    // （install_default_damage_reduction 注册，可被 damage_suppress_mask 抑制）。
     snapshot.base = std::max(0, Calculation::calculateDamage(attacker_id, ctx->ws, skill));
-    snapshot.afterAdd = Calculation::applyDamageReduction(
-        snapshot.base,
-        ctx->damage_reduce_add[defender_id],
-        ctx->damage_reduce_mul[defender_id]
-    );
-    snapshot.afterMul = snapshot.afterAdd;
-    snapshot.final = snapshot.afterAdd;
+    snapshot.afterAdd = snapshot.base;
+    snapshot.afterMul = snapshot.base;
+    snapshot.final = snapshot.base;
     snapshot.addPct = 0;
     snapshot.mulCoef = 1.0;
     snapshot.isRed = true;
@@ -227,6 +225,11 @@ void apply_resolved_damage(BattleContext* ctx) {
 
     const DamageSnapshot& damage = ctx->resolvedDamage;
     if (damage.defenderId < 0 || damage.defenderId > 1 || damage.final <= 0) {
+        // 攻击被拦下/归零（免疫、减伤到 0、锁伤、归零等）：通知 watcher（如"免疫成功则令对手全属性+1"）
+        if (damage.attackerId >= 0 && damage.attackerId <= 1 && damage.defenderId >= 0 && damage.defenderId <= 1) {
+            ctx->event_center_.emit(BattleEvent{EventType::EVENT_ATTACK_BLOCKED,
+                                                 damage.attackerId, damage.defenderId, 0});
+        }
         return;
     }
 

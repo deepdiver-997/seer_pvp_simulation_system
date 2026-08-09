@@ -408,6 +408,40 @@ std::optional<SoulMarkRecord> OfficialDataRepository::load_soul_mark(int soul_ma
     return record;
 }
 
+std::optional<CommonTraitRecord> OfficialDataRepository::load_common_trait(int idx) const {
+    if (!db_) {
+        last_error_ = "database is not open";
+        return std::nullopt;
+    }
+    if (idx <= 0) {
+        return std::nullopt;
+    }
+
+    Statement stmt(
+        db_,
+        "SELECT idx, stat, effect_id, COALESCE(args, ''), "
+        "COALESCE(desc, ''), COALESCE(intro, ''), COALESCE(star_level, 0) "
+        "FROM new_se WHERE idx = ?1 AND stat = 1"
+    );
+    if (!stmt || !bind_int(stmt.get(), 1, idx)) {
+        last_error_ = sqlite3_errmsg(db_);
+        return std::nullopt;
+    }
+    if (sqlite3_step(stmt.get()) != SQLITE_ROW) {
+        return std::nullopt;
+    }
+
+    CommonTraitRecord record;
+    record.id = sqlite3_column_int(stmt.get(), 0);
+    record.stat = sqlite3_column_int(stmt.get(), 1);
+    record.effect_id = sqlite3_column_int(stmt.get(), 2);
+    record.args = parse_int_list(column_text(stmt.get(), 3));
+    record.description = column_text(stmt.get(), 4);
+    record.intro = column_text(stmt.get(), 5);
+    record.star_level = sqlite3_column_int(stmt.get(), 6);
+    return record;
+}
+
 void OfficialDataRepository::ensure_type_components_cache() const {
     if (type_components_cache_loaded_ || !db_) {
         return;

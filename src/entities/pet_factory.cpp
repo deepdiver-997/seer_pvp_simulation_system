@@ -1,6 +1,7 @@
 #include <entities/pet_factory.h>
 
 #include <effects/effect.h>
+#include <entities/common_trait.h>
 #include <entities/elemental-attributes.h>
 #include <entities/soul_mark_manager.h>
 
@@ -14,7 +15,7 @@
 namespace {
 
 constexpr std::size_t kBattlePartySize = 6;
-constexpr std::size_t kBattlePetIntCount = 12;
+constexpr std::size_t kBattlePetIntCount = 13;  // pet_id + 5 skills + 6 base + common_trait_id
 constexpr std::size_t kBattleCreateRequestIntCount = kBattlePartySize * 2 * kBattlePetIntCount;
 
 std::string build_invalid_skill_message(int pet_id, const std::string& pet_name, int skill_id) {
@@ -63,6 +64,8 @@ BattleCreateRequest decode_battle_create_request(const std::vector<char>& payloa
             pet.numerical_base[i] = read_int(cursor);
             cursor += sizeof(int);
         }
+        pet.common_trait_id = read_int(cursor);
+        cursor += sizeof(int);
     };
 
     for (auto& pet : request.side1) {
@@ -115,6 +118,7 @@ ElfPet PetFactory::create_pet(const BattlePetMessage& message) {
         monster->soul_mark_id,
         map_gender(monster->gender),
         create_soul_mark_for_pet(*monster),
+        create_common_trait_for_pet(message.common_trait_id),
         numerical_base,
         hp,
         levels,
@@ -173,6 +177,26 @@ SoulMark PetFactory::create_soul_mark_for_pet(const official_data::MonsterRecord
         !record->description.empty() ? record->description : record->intro,
         EffectArgs(record->args)
     );
+}
+
+CommonTrait PetFactory::create_common_trait_for_pet(int common_trait_id) {
+    if (common_trait_id <= 0) {
+        return CommonTrait{};
+    }
+
+    auto& repository = official_data::OfficialDataStore::instance().repository();
+    const std::optional<official_data::CommonTraitRecord> record = repository.load_common_trait(common_trait_id);
+    if (!record) {
+        return CommonTrait{};
+    }
+
+    CommonTrait trait;
+    trait.id = record->id;
+    trait.name = record->description;  // desc 列 = 特性名
+    trait.star_level = record->star_level;
+    trait.description = record->intro;
+    trait.args = record->args;
+    return trait;
 }
 
 numerical_properties PetFactory::create_numerical_base(

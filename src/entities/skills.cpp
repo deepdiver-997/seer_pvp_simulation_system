@@ -43,6 +43,27 @@ State default_register_state_for_effect(int effect_id) {
     }
 }
 
+/**
+ * 效果所属分支（HIT / SKILL_INVALID）。
+ *
+ * 官方 effect 描述决定效果何时触发：
+ *   - 普通效果：技能命中才触发 → HIT 分支
+ *   - "技能无效时XXX" 的被动效果：技能 miss/禁用时仍要执行 → SKILL_INVALID 分支
+ *
+ * 目前已知的"无效时触发"效果（数据可后续移入 DB 表）：
+ *   - 2006：技能无效时，免疫下1次对手的攻击，免疫成功则令对手全属性+1（索杰德尔·无念归空净）
+ *   - 2501：技能无效时，重新进行伤害结算且每260特攻威力翻倍1次（薇尔诗·乐园之初诞）
+ */
+SkillExecResult default_branch_for_effect(int effect_id) {
+    switch (effect_id) {
+        case 2006:
+        case 2501:
+            return SkillExecResult::SKILL_INVALID;
+        default:
+            return SkillExecResult::HIT;
+    }
+}
+
 } // namespace
 
 Skills::Skills(int id, const official_data::MonsterRecord& monster)
@@ -94,7 +115,7 @@ bool Skills::loadSkills() {
             continue;
         }
         add_effect_node(
-            SkillExecResult::HIT,
+            default_branch_for_effect(effect_record.effect_id),
             SkillEffectNode(std::move(effect), default_register_state_for_effect(effect_record.effect_id))
         );
     }

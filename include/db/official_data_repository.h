@@ -69,6 +69,18 @@ struct SoulMarkRecord {
     int star_level = 0;
 };
 
+// 通用特性（new_se 表 stat=1，50 种 × 等级 0-5）。每种特性是任何精灵都可配置的通用能力，
+// 非怪物天生绑定，创建宠物时通过 BattlePetMessage.common_trait_id 指定。
+struct CommonTraitRecord {
+    int id = 0;           // idx 主键
+    int stat = 1;
+    int effect_id = -1;
+    std::vector<int> args;
+    std::string description;  // desc 列（特性名，如 瞬杀/精准/强袭）
+    std::string intro;        // intro 列（人读描述）
+    int star_level = 0;       // 等级 0-5
+};
+
 class OfficialDataRepository {
 public:
     OfficialDataRepository() = default;
@@ -91,6 +103,7 @@ public:
     std::optional<MonsterRecord> load_monster_by_exact_name(const std::string& monster_name) const;
     std::vector<LearnableMoveRecord> load_monster_learnable_moves(int monster_id) const;
     std::optional<SoulMarkRecord> load_soul_mark(int soul_mark_id) const;
+    std::optional<CommonTraitRecord> load_common_trait(int idx) const;
 
     // 从 types_relation（官方克制表）填充克制矩阵。
     // matrix[attacker_type_id][defender_type_id] ∈ {0, 1, 2}（0=微弱/免疫, 1=普通, 2=克制）。

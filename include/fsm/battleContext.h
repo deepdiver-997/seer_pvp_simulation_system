@@ -294,6 +294,7 @@ public:
         event_center_.clear_all();
         immunity_center_.clear_all();
         damage_pipeline_.clear();
+        install_default_damage_reduction();
     }
 
     //--- 回合类效果管理 ---
@@ -374,6 +375,14 @@ public:
                                 std::function<void(BattleContext*, int)> fn) {
         damage_pipeline_.register_effect(phase, owner, category, std::move(fn));
     }
+
+    /**
+     * 安装默认减伤（REDUCE 阶段，MITIGATE 类别）。
+     * 把工作区 damage_reduce_add/mul（4 槽减伤）从同步 inline 结算迁入管线，
+     * 从而可被 damage_suppress_mask 按类别抑制（如沧岚"挡伤失效"）并可与其他 REDUCE 效果排序。
+     * 每次攻击伤害结算前确保已安装（init_battle / clearAllEffects 后调用）。
+     */
+    void install_default_damage_reduction();
 
     /**
      * O(1) 查询目标是否还有回合类效果

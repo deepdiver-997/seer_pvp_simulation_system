@@ -27,6 +27,8 @@ enum class EventType {
     EVENT_ENTER_STAGE,       // 上场
     EVENT_SWAP,              // 换宠
     EVENT_OPPONENT_DEFEATED, // 击败对手
+    EVENT_SKILL_INVALID,     // 技能无效/未命中（SkillExecutionEffect 中 emit，target = 对方）
+    EVENT_ATTACK_BLOCKED,    // 攻击被拦下/归零（apply_resolved_damage 中 final<=0 时 emit）
 };
 
 /**

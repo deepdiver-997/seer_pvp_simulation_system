@@ -1,5 +1,6 @@
 #include <fsm/battleContext.h>
 #include <fsm/battleFsm.h>
+#include <numerical-calculation/calculation.h>
 #include <iostream>
 #include <sstream>
 
@@ -146,6 +147,34 @@ void BattleContext::init_battle() {
     roundChoice[0][1] = -1;
     roundChoice[1][0] = -1;
     roundChoice[1][1] = -1;
+    install_default_damage_reduction();
+}
+
+void BattleContext::install_default_damage_reduction() {
+    for (int owner = 0; owner < 2; ++owner) {
+        // 减伤只从"防御方"的槽位读取。管线在 REDUCE 阶段会先后走攻击方/防御方两个桶，
+        // 因此回调里用 resolvedDamage.defenderId 判断当前桶 owner 是否为防御方，是才施加。
+        // MITIGATE 类别 → 可被 damage_suppress_mask 抑制（如沧岚"挡伤失效"）。
+        register_damage_effect(
+            DamagePhase::REDUCE,
+            owner,
+            DamageEffectCategory::MITIGATE,
+            [](BattleContext* ctx, int bucket_owner) {
+                if (!ctx) {
+                    return;
+                }
+                const int defender = ctx->resolvedDamage.defenderId;
+                if (defender < 0 || defender > 1 || bucket_owner != defender) {
+                    return;
+                }
+                ctx->resolvedDamage.final = Calculation::applyDamageReduction(
+                    ctx->resolvedDamage.final,
+                    ctx->damage_reduce_add[defender],
+                    ctx->damage_reduce_mul[defender]
+                );
+            }
+        );
+    }
 }
 
 bool BattleContext::need_input() const {

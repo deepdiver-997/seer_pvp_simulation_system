@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <db/official_data_repository.h>
+#include <entities/common_trait.h>
 #include <entities/elf-pet.h>
 #include <entities/seer-robot.h>
 
@@ -13,6 +14,7 @@ struct BattlePetMessage {
     int pet_id = 0;
     std::array<int, 5> chosen_skills_id{};
     std::array<int, 6> numerical_base{};
+    int common_trait_id = 0;  // new_se.idx WHERE stat=1; 0 = 无通用特性
 };
 
 struct BattleCreateRequest {
@@ -33,6 +35,7 @@ private:
         const std::array<int, 5>& chosen_skill_ids
     );
     static SoulMark create_soul_mark_for_pet(const official_data::MonsterRecord& monster);
+    static CommonTrait create_common_trait_for_pet(int common_trait_id);
     static numerical_properties create_numerical_base(
         const official_data::MonsterRecord& monster,
         const std::array<int, 6>& requested_base

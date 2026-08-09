@@ -115,6 +115,7 @@ bool SkillExecutionEffect::operator()(BattleContext* ctx) {
 
     if (!skill.skill_usable()) {
         applySkillResult(SkillExecResult::SKILL_INVALID);
+        ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner_, ctx->opponent(owner_)});
         registerBranch(ctx, SkillExecResult::SKILL_INVALID, skill);
         return false;
     }
@@ -123,6 +124,7 @@ bool SkillExecutionEffect::operator()(BattleContext* ctx) {
 
     if (!hit) {
         applySkillResult(SkillExecResult::SKILL_INVALID);
+        ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner_, ctx->opponent(owner_)});
         registerBranch(ctx, SkillExecResult::SKILL_INVALID, skill);
         return true;
     }
