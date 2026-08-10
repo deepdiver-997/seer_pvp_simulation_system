@@ -197,3 +197,16 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     // 受到伤害事件（第三方"受到攻击伤害后/受高伤/受低伤"监听），amount = 实际扣血
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target, actual_damage});
 }
+
+void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
+                int count, int source_id) {
+    if (!ctx || target < 0 || target > 1 || count <= 0) {
+        return;
+    }
+    if (!attribute && !attack) {
+        return;
+    }
+    ctx->skill_seals[target].push_back(BattleContext::SkillSeal{
+        source_id, count, attribute, attack,
+    });
+}

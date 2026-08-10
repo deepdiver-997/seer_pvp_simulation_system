@@ -104,4 +104,23 @@ enum class DamageKind {
 void deal_damage(BattleContext* ctx, int target, int amount,
                  DamageKind kind = DamageKind::NORMAL, int actor = -1);
 
+// ----------------------------------------------------------------
+// 技能拦截（封属性/封攻击）
+// ----------------------------------------------------------------
+
+/**
+ * seal_skill - 给目标方挂技能拦截效果（次数类）。
+ *
+ * "对手下1次属性技能失效"类效果用：目标方后续使用对应类别技能时被拦截（次数-1），
+ * 拦截发生时技能按 SKILL_INVALID 处理。回合类拦截（被控）不归这里，走异常系统。
+ *
+ * @param target     被拦截方 (0/1)
+ * @param attribute  是否封属性技能
+ * @param attack     是否封攻击技能
+ * @param count      拦截次数（>0）
+ * @param source_id  施放方（未知传 -1）
+ */
+void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
+                int count, int source_id = -1);
+
 #endif // BATTLE_PRIMITIVES_H

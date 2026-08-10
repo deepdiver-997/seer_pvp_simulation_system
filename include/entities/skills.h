@@ -29,6 +29,20 @@ struct SkillUsabilityEffectEntry {
     bool active = true;
 };
 
+// 选择期：技能能否被选中（在操作确认时检查，早于先手权判定）
+enum class SkillSelectionResult {
+    SELECTABLE,   // 可选
+    PP_EMPTY,     // PP 耗尽
+    LOCKED,       // 被锁定/封印，无法选择
+};
+
+// 执行期：本次技能使用能否成功（先手权判定后、轮到出手时检查）
+enum class SkillUsageResult {
+    OK,      // 可用
+    MISS,    // 未命中（命中率判定失败）
+    SEALED,  // 被次数类拦截（封属性/封攻击，已消费次数）
+};
+
 // SkillEffectNode - 技能分支中的单个注册节点
 //
 // effect 做什么，由 Effect 模板本身负责；
@@ -83,6 +97,13 @@ public:
     Effect clone_effect(int effectId, EffectArgs args = {}) const;
     void add_effect_node(SkillExecResult result, SkillEffectNode node);
 
+    //--- 三阶段生命周期 ---
+    // 选择期（操作确认时）：技能能否被选中 → 立即注册先制等即时效果
+    SkillSelectionResult query_selectable(BattleContext* ctx, int owner);
+    void on_selected(BattleContext* ctx, int owner);
+    // 执行期（先手权判定后、轮到出手时）：本次使用能否成功（miss/封效果）
+    SkillUsageResult query_usage(BattleContext* ctx, int owner);
+
     bool is_locked = false;
     int maxPP;
     int pp;  // pp == -1 -> 技能使用无限制
@@ -111,6 +132,10 @@ public:
     // Effect 逻辑函数指针的来源可以是动态库或 EffectFactory，
     // 但真正参与技能分支的 Effect 实例由 Skills 分支节点持有生命周期。
     std::map<SkillExecResult, std::vector<SkillEffectNode>> effectBranches;
+
+    // 选择期效果集合：选技能时立即注册到 BATTLE_FIRST_MOVE_RIGHT 的效果。
+    // 至少含基值先制（preemptive_level[owner] += priority）；条件先制效果由数据追加。
+    std::vector<SkillEffectNode> selection_effects_;
 
     // 技能可用性修饰列表：
     // 典型用途：魂印/印记带来的“PP=0 仍可释放”或“禁止无视PP”。

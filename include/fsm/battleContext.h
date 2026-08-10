@@ -189,6 +189,17 @@ public:
     // 类别抑制（damage_suppress_mask）按效果类别跳过被抑制方的伤害效果。
     DamagePipeline damage_pipeline_;
 
+    //--- 技能拦截桶（封属性/封攻击，次数类，跨回合）---
+    // 次数类拦截效果（如"对手下1次属性技能失效"）挂在这里，按被拦截方 owner 索引。
+    // 回合类拦截（被控/疲惫）走异常状态系统，自然减扣，不入此桶。
+    struct SkillSeal {
+        int source_id = -1;   // 谁放的（0/1）
+        int remaining = 0;    // 剩余拦截次数
+        bool seal_attribute = false;  // 封锁属性技能（category=4）
+        bool seal_attack = false;     // 封锁攻击技能（category=1/2）
+    };
+    std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
+
     //--- 技能效果执行表 ---
     std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>> skills_effects;
 

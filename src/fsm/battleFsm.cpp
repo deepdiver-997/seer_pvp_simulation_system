@@ -618,6 +618,22 @@ void BattleFsm::handle_OperationChooseSkillMedicament(BattleContext* battleConte
         battleContext->roundChoice[actor][1] == buf[2];
 
     if (accepted) {
+        // 选择期生命周期：技能可选 → 注册先制等即时效果
+        if (static_cast<ActionType>(buf[1]) == ActionType::SELECT_SKILL) {
+            ElfPet& pet = battleContext->seerRobot[actor].elfPets[battleContext->on_stage[actor]];
+            Skills& skill = pet.skills[buf[2]];
+            const SkillSelectionResult sel = skill.query_selectable(battleContext, actor);
+            if (sel == SkillSelectionResult::SELECTABLE) {
+                skill.on_selected(battleContext, actor);
+            } else {
+                // 不可选（PP 耗尽/锁定）：拒绝该操作，要求重选
+                battleContext->control_block_->async_write(
+                    battleContext->current_player_id_,
+                    "Error: skill not selectable, please resubmit\n",
+                    battleContext, this);
+                return;
+            }
+        }
         battleContext->operation_collected[actor] = true;
     } else {
         battleContext->control_block_->async_write(
@@ -710,8 +726,7 @@ void BattleFsm::handle_BattleFirstMoveRight(BattleContext* battleContext) {
         return;
     }
     // 都使用了技能，比较先制等级
-    battleContext->ws.preemptive_level[0] += battleContext->seerRobot[0].elfPets[battleContext->on_stage[0]].skills[battleContext->ws.lastActionIndex[0]].priority;
-    battleContext->ws.preemptive_level[1] += battleContext->seerRobot[1].elfPets[battleContext->on_stage[1]].skills[battleContext->ws.lastActionIndex[1]].priority;
+    // 基值先制已在选择期（on_selected）累加进 ws.preemptive_level；此处不再重复读 skill.priority
     if (battleContext->ws.preemptive_level[0] > battleContext->ws.preemptive_level[1]) {
         pr = PreemptiveRight::SEER_ROBOT_1;
         log("Preemptive right determined by preemptive level: player0 wins.");

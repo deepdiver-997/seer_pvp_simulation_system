@@ -125,7 +125,6 @@ public:
     const SkillResolutionFlags& getLastResolutionFlags() const { return lastResolutionFlags_; }
 
 private:
-    bool calculateHit(BattleContext* ctx, int attackerId, int skillIndex);
     bool isHitEffectInvalid(BattleContext* ctx, int attackerId, int skillIndex) const;
     void applySkillResult(SkillExecResult result);
     void registerBranch(BattleContext* ctx, SkillExecResult result, const Skills& skill);

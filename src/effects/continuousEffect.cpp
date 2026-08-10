@@ -113,16 +113,9 @@ bool SkillExecutionEffect::operator()(BattleContext* ctx) {
     ElfPet& pet = ctx->seerRobot[owner_].elfPets[ctx->on_stage[owner_]];
     Skills& skill = pet.skills[skillIndex_];
 
-    if (!skill.skill_usable()) {
-        applySkillResult(SkillExecResult::SKILL_INVALID);
-        ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner_, ctx->opponent(owner_)});
-        registerBranch(ctx, SkillExecResult::SKILL_INVALID, skill);
-        return false;
-    }
-
-    bool hit = calculateHit(ctx, owner_, skillIndex_);
-
-    if (!hit) {
+    // 执行期可用性判定（统一走 query_usage：miss + 封属性/封攻击）
+    const SkillUsageResult usage = skill.query_usage(ctx, owner_);
+    if (usage == SkillUsageResult::MISS || usage == SkillUsageResult::SEALED) {
         applySkillResult(SkillExecResult::SKILL_INVALID);
         ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner_, ctx->opponent(owner_)});
         registerBranch(ctx, SkillExecResult::SKILL_INVALID, skill);
@@ -142,22 +135,6 @@ bool SkillExecutionEffect::operator()(BattleContext* ctx) {
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner_, ctx->opponent(owner_)});
 
     return true;
-}
-
-bool SkillExecutionEffect::calculateHit(BattleContext* ctx, int attackerId, int skillIndex) {
-    ElfPet& attacker = ctx->seerRobot[attackerId].elfPets[ctx->on_stage[attackerId]];
-    Skills& skill = attacker.skills[skillIndex];
-
-    // 必中技能无视命中率（官方 MustHit=1，约 10948 个技能）
-    if (skill.must_hit) {
-        return true;
-    }
-
-    int accuracy = skill.accuracy;
-    float dodgeChance = ctx->ws.dodge_rate[1 - attackerId];
-    int hitChance = accuracy - static_cast<int>(dodgeChance * 100);
-
-    return (std::rand() % 100) < hitChance;
 }
 
 bool SkillExecutionEffect::isHitEffectInvalid(BattleContext* ctx, int attackerId, int skillIndex) const {
