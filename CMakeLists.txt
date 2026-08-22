@@ -22,6 +22,7 @@ set(SIM_CORE_SOURCES
     src/db/official_data_repository.cpp
     src/effects/continuousEffect.cpp
     src/effects/effect.cpp
+    src/effects/effect_meta.cpp
     src/effects/pendingEffect.cpp
     src/effects/damage_pipeline.cpp
     src/entities/pet_factory.cpp

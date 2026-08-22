@@ -1,6 +1,7 @@
 #include <entities/pet_factory.h>
 
 #include <effects/effect.h>
+#include <effects/effect_meta.h>
 #include <entities/common_trait.h>
 #include <entities/elemental-attributes.h>
 #include <entities/soul_mark_manager.h>
@@ -89,6 +90,12 @@ bool PetFactory::initialize_runtime_data(const std::string& db_path) {
     // 加载官方克制表（types_relation）到 ElementalAttributes 矩阵。
     ElementalAttributes().loadElementalAttributes();
 
+    // 构建效果元数据目录（effect_info 模板启发式分类 + 覆盖表）。
+    // 失败不阻断启动：元数据缺失时相关查询返回"未知"，引擎主体不受影响。
+    if (!EffectMetaCatalog::instance().build()) {
+        std::cerr << "Warning: effect meta catalog not built (effect_info empty?)" << std::endl;
+    }
+
     // Ensure effect plugins are loaded before any skill/soulmark cloning happens.
     EffectFactory::getInstance("resources/moves_lib");
     SoulMarkManager::getInstance("resources/soul_lib");
@@ -161,22 +168,43 @@ std::array<Skills, 5> PetFactory::create_skills_for_pet(
 }
 
 SoulMark PetFactory::create_soul_mark_for_pet(const official_data::MonsterRecord& monster) {
-    if (monster.soul_mark_id <= 0) {
+    auto& repository = official_data::OfficialDataStore::instance().repository();
+
+    // 老链路：monsters.soul_mark_id → new_se（老精灵）。unity 库该列全 0，
+    // 现代精灵走下方 effect_icon 链路。
+    if (monster.soul_mark_id > 0) {
+        const std::optional<official_data::SoulMarkRecord> record =
+            repository.load_soul_mark(monster.soul_mark_id);
+        if (!record) {
+            return SoulMark(monster.soul_mark_id, "SoulMark#" + std::to_string(monster.soul_mark_id), "");
+        }
+
+        return SoulMark(
+            record->id,
+            "SoulMark#" + std::to_string(record->id),
+            !record->description.empty() ? record->description : record->intro,
+            EffectArgs(record->args)
+        );
+    }
+
+    // 现代链路：effect_icon.pet_id（JSON 精确匹配）→ tips 全文。
+    // effect_id 是引擎内部效果号，作为 SoulMark.id（插件函数注册键）；
+    // 未实现的效果函数为 nullptr，但描述文本可用于展示与 AI 观测。
+    const std::optional<official_data::SoulMarkDisplayRecord> display =
+        repository.load_soul_mark_display_by_monster(monster.id);
+    if (!display) {
         return SoulMark{};
     }
 
-    auto& repository = official_data::OfficialDataStore::instance().repository();
-    const std::optional<official_data::SoulMarkRecord> record = repository.load_soul_mark(monster.soul_mark_id);
-    if (!record) {
-        return SoulMark(monster.soul_mark_id, "SoulMark#" + std::to_string(monster.soul_mark_id), "");
-    }
-
-    return SoulMark(
-        record->id,
-        "SoulMark#" + std::to_string(record->id),
-        !record->description.empty() ? record->description : record->intro,
-        EffectArgs(record->args)
+    SoulMark soul_mark(
+        display->effect_id,
+        monster.name + "魂印",
+        display->tips_plain,
+        EffectArgs(display->args)
     );
+    soul_mark.kind_tags = display->kind_tags;
+    soul_mark.monster_id = monster.id;
+    return soul_mark;
 }
 
 CommonTrait PetFactory::create_common_trait_for_pet(int common_trait_id) {

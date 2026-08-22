@@ -442,6 +442,165 @@ std::optional<CommonTraitRecord> OfficialDataRepository::load_common_trait(int i
     return record;
 }
 
+// 去除官方富文本标记（[color=#xxx]...[/color]、[sprite name=xxx]、\n 转义）。
+std::string strip_rich_text(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size());
+    std::size_t i = 0;
+    const std::size_t n = raw.size();
+    while (i < n) {
+        if (raw[i] == '[') {
+            const std::size_t close = raw.find(']', i);
+            if (close != std::string::npos) {
+                const std::string tag = raw.substr(i + 1, close - i - 1);
+                const bool is_rich = tag.rfind("color", 0) == 0 || tag.rfind("/color", 0) == 0
+                    || tag.rfind("size", 0) == 0 || tag.rfind("/size", 0) == 0
+                    || tag.rfind("sprite", 0) == 0;
+                if (is_rich) {
+                    i = close + 1;
+                    continue;
+                }
+            }
+        }
+        if (raw[i] == '\\' && i + 1 < n && raw[i + 1] == 'n') {
+            out += '\n';
+            i += 2;
+            continue;
+        }
+        out += raw[i];
+        ++i;
+    }
+    return out;
+}
+
+std::optional<SoulMarkDisplayRecord> OfficialDataRepository::load_soul_mark_display_by_monster(
+    int monster_id
+) const {
+    if (!db_) {
+        last_error_ = "database is not open";
+        return std::nullopt;
+    }
+
+    Statement stmt(
+        db_,
+        "SELECT id, pet_id, effect_id, COALESCE(kind, '[]'), COALESCE(args, ''), "
+        "COALESCE(tips, ''), COALESCE(come, '') FROM effect_icon"
+    );
+    if (!stmt) {
+        last_error_ = sqlite3_errmsg(db_);
+        return std::nullopt;
+    }
+
+    // pet_id 是 JSON 数组字符串（如 "[4911]"），必须解析后精确比对，
+    // LIKE 匹配会把 14911 误认成 4911。多行（基础/强化版本）取 icon_id 最大。
+    std::optional<SoulMarkDisplayRecord> best;
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        const std::vector<int> pet_ids = parse_json_int_array(column_text(stmt.get(), 1));
+        if (std::find(pet_ids.begin(), pet_ids.end(), monster_id) == pet_ids.end()) {
+            continue;
+        }
+        const int icon_id = sqlite3_column_int(stmt.get(), 0);
+        if (best && best->icon_id >= icon_id) {
+            continue;
+        }
+        SoulMarkDisplayRecord record;
+        record.monster_id = monster_id;
+        record.icon_id = icon_id;
+        record.effect_id = sqlite3_column_int(stmt.get(), 2);
+        record.kind_tags = parse_json_int_array(column_text(stmt.get(), 3));
+        record.args = parse_int_list(column_text(stmt.get(), 4));
+        record.tips = column_text(stmt.get(), 5);
+        record.tips_plain = strip_rich_text(record.tips);
+        record.come = column_text(stmt.get(), 6);
+        best = std::move(record);
+    }
+    return best;
+}
+
+std::optional<TermRecord> OfficialDataRepository::load_term(const std::string& term_name) const {
+    if (!db_) {
+        last_error_ = "database is not open";
+        return std::nullopt;
+    }
+
+    auto run = [&](const char* sql) -> std::optional<TermRecord> {
+        Statement stmt(db_, sql);
+        if (!stmt || !bind_text(stmt.get(), 1, term_name)) {
+            last_error_ = sqlite3_errmsg(db_);
+            return std::nullopt;
+        }
+        if (sqlite3_step(stmt.get()) != SQLITE_ROW) {
+            return std::nullopt;
+        }
+        TermRecord record;
+        record.id = sqlite3_column_int(stmt.get(), 0);
+        record.kind = sqlite3_column_int(stmt.get(), 1);
+        record.name = column_text(stmt.get(), 2);
+        record.description = strip_rich_text(column_text(stmt.get(), 3));
+        return record;
+    };
+
+    if (auto record = run(
+            "SELECT id, kind, kinddes, COALESCE(desc, '') FROM effect_des WHERE kinddes = ?1")) {
+        return record;
+    }
+    return run(
+        "SELECT id, kind, kinddes, COALESCE(desc, '') FROM effect_des WHERE kinddes LIKE ?1 LIMIT 1");
+}
+
+std::vector<TermRecord> OfficialDataRepository::load_terms_by_kind(int kind) const {
+    std::vector<TermRecord> records;
+    if (!db_) {
+        last_error_ = "database is not open";
+        return records;
+    }
+
+    Statement stmt(
+        db_,
+        "SELECT id, kind, kinddes, COALESCE(desc, '') FROM effect_des WHERE kind = ?1"
+    );
+    if (!stmt || !bind_int(stmt.get(), 1, kind)) {
+        last_error_ = sqlite3_errmsg(db_);
+        return records;
+    }
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        TermRecord record;
+        record.id = sqlite3_column_int(stmt.get(), 0);
+        record.kind = sqlite3_column_int(stmt.get(), 1);
+        record.name = column_text(stmt.get(), 2);
+        record.description = strip_rich_text(column_text(stmt.get(), 3));
+        records.push_back(std::move(record));
+    }
+    return records;
+}
+
+std::vector<EffectTemplateRecord> OfficialDataRepository::load_all_effect_templates() const {
+    std::vector<EffectTemplateRecord> records;
+    if (!db_) {
+        last_error_ = "database is not open";
+        return records;
+    }
+
+    Statement stmt(
+        db_,
+        "SELECT id, COALESCE(args_num, 0), COALESCE(info, ''), COALESCE(param, '') "
+        "FROM effect_info"
+    );
+    if (!stmt) {
+        last_error_ = sqlite3_errmsg(db_);
+        return records;
+    }
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        EffectTemplateRecord record;
+        record.id = sqlite3_column_int(stmt.get(), 0);
+        record.args_num = sqlite3_column_int(stmt.get(), 1);
+        record.info = column_text(stmt.get(), 2);
+        record.param = column_text(stmt.get(), 3);
+        records.push_back(std::move(record));
+    }
+    return records;
+}
+
 void OfficialDataRepository::ensure_type_components_cache() const {
     if (type_components_cache_loaded_ || !db_) {
         return;

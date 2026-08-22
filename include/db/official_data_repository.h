@@ -81,6 +81,40 @@ struct CommonTraitRecord {
     int star_level = 0;       // 等级 0-5
 };
 
+// 现代精灵魂印展示记录（effect_icon 表）。
+// monsters.soul_mark_id 在 unity 库中全为 0（死列），魂印权威数据在 effect_icon：
+// pet_id 是 JSON 数组字符串（须精确匹配，LIKE 会误中 14911 之类）；
+// tips 是完整描述（含富文本标记），kind 是官方分类标签；
+// effect_id 是引擎内部效果号，本库快照不可解析，原样保留。
+// 一只精灵可能有多行（基础/强化版本），取 icon_id 最大者为当前版本。
+struct SoulMarkDisplayRecord {
+    int icon_id = 0;             // effect_icon.id 行主键
+    int effect_id = 0;           // 引擎内部效果号（插件函数注册键）
+    std::vector<int> kind_tags;  // kind 列（JSON 数组解析）
+    std::vector<int> args;       // args 列（空格分隔）
+    std::string tips;            // 原始富文本描述
+    std::string tips_plain;      // 去富文本纯文本
+    std::string come;            // 来源描述
+    int monster_id = 0;
+};
+
+// effect_des 词典词条。kind=1 专属名词/状态词条（412 条）；kind=2 异常状态定义（46 条）；
+// kind=3~5 机制/时点术语（"执行""回合开始时""免疫对手的攻击"等官方正式定义）。
+struct TermRecord {
+    int id = 0;
+    int kind = 0;
+    std::string name;         // kinddes 列
+    std::string description;  // desc 列
+};
+
+// effect_info 效果模板（元数据分类器的输入）。
+struct EffectTemplateRecord {
+    int id = 0;
+    int args_num = 0;
+    std::string info;   // 模板文本（{0}{1} 占位符）
+    std::string param;  // 参数类型规格（类型 id 数组，unity 库无图例表，原样保留）
+};
+
 class OfficialDataRepository {
 public:
     OfficialDataRepository() = default;
@@ -104,6 +138,17 @@ public:
     std::vector<LearnableMoveRecord> load_monster_learnable_moves(int monster_id) const;
     std::optional<SoulMarkRecord> load_soul_mark(int soul_mark_id) const;
     std::optional<CommonTraitRecord> load_common_trait(int idx) const;
+
+    // 现代精灵魂印：按精灵 id 从 effect_icon 精确匹配（pet_id JSON 数组），
+    // 多行取 icon_id 最大。无记录返回 nullopt。
+    std::optional<SoulMarkDisplayRecord> load_soul_mark_display_by_monster(int monster_id) const;
+
+    // effect_des 词典：名字精确匹配（失败退 LIKE），kind 过滤查询（2=异常状态词表等）。
+    std::optional<TermRecord> load_term(const std::string& term_name) const;
+    std::vector<TermRecord> load_terms_by_kind(int kind) const;
+
+    // 全量 effect_info 模板（约 2340 条），供 EffectMetaCatalog 构建用。
+    std::vector<EffectTemplateRecord> load_all_effect_templates() const;
 
     // 从 types_relation（官方克制表）填充克制矩阵。
     // matrix[attacker_type_id][defender_type_id] ∈ {0, 1, 2}（0=微弱/免疫, 1=普通, 2=克制）。

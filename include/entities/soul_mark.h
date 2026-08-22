@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <effects/effect.h>
 #include <entities/soul_mark_manager.h>
@@ -23,6 +24,10 @@ public:
     std::string description;
     EffectFn effect = nullptr;
     EffectArgs args;
+    // 官方 effect_icon.kind 分类标签（现代魂印链路填充；老链路为空）。
+    std::vector<int> kind_tags;
+    // 归属精灵 id（现代魂印链路填充；0 = 未知）。
+    int monster_id = 0;
     void register_soul_effect(BattleContext* context);
     void unregister_soul_effect(BattleContext* context);
 };
