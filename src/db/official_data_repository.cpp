@@ -133,10 +133,11 @@ std::optional<int> query_side_effect_arg_count(sqlite3* db, int effect_id) {
 }
 
 void fill_effect_metadata(sqlite3* db, SkillEffectRecord& effect) {
+    // 注意：新 Unity 库 effect_info 无 sp 列（旧 H5 遗留），查询只取实际存在的列，
+    // 否则整个语句失败 → info 永远为空（2026-08-22 组合语法解析时发现）。
     Statement stmt(
         db,
-        "SELECT args_num, info, param, COALESCE(sp, '') "
-        "FROM effect_info WHERE id = ?1"
+        "SELECT args_num, info, param FROM effect_info WHERE id = ?1"
     );
     if (!stmt || !bind_int(stmt.get(), 1, effect.effect_id)) {
         return;
@@ -147,7 +148,6 @@ void fill_effect_metadata(sqlite3* db, SkillEffectRecord& effect) {
     effect.effect_args_num = sqlite3_column_int(stmt.get(), 0);
     effect.info = column_text(stmt.get(), 1);
     effect.param = column_text(stmt.get(), 2);
-    effect.sp = column_text(stmt.get(), 3);
 }
 
 std::vector<SkillEffectRecord> build_skill_effects(

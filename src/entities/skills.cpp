@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <effects/effect_meta.h>
+#include <effects/effect_unit_parser.h>
 #include <fsm/battleContext.h>
 
 namespace {
@@ -129,6 +130,17 @@ void materialize_attack_credential(BattleContext* ctx, int owner, const Skills& 
     cred.valid = cred.ignore_attack_immunity || cred.ignore_damage_limit || cred.force_execute;
 }
 
+// 通用执行器：运行解析出的条件效果单元（Effect.args.extra 指向单元，见 loadSkills）。
+// 组合语法：未注册函数的效果模板经 parse_effect_unit 解析成单元，由此函数驱动。
+EffectResult effect_run_parsed_unit(BattleContext* ctx, const EffectArgs& args) {
+    const auto* unit = static_cast<const EffectUnit*>(args.extra);
+    if (!ctx || !unit) {
+        return EffectResult::kOk;
+    }
+    execute_effect_unit(ctx, args, *unit);
+    return EffectResult::kOk;
+}
+
 } // namespace
 
 Skills::Skills(int id, const official_data::MonsterRecord& monster)
@@ -174,6 +186,9 @@ bool Skills::loadSkills() {
     rawEffectRecords = record->effects;
     effectBranches.clear();
     selection_effects_.clear();
+    parsed_units_.clear();
+    // 解析器的分支指针指向 parsed_units_ 内元素，reserve 足量防 realloc 悬垂。
+    parsed_units_.reserve(rawEffectRecords.size() * 3 + 4);
 
     for (const auto& effect_record : rawEffectRecords) {
         // 穿透类效果（697"无视伤害限制"/699"无视攻击免疫"）→ 并入本技能穿透凭证，
@@ -189,6 +204,22 @@ bool Skills::loadSkills() {
         }
         Effect effect = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));
         if (!effect.logic) {
+            // 未注册函数：尝试解析模板为条件效果单元（组合语法），成功则注册通用执行器
+            // （args.extra 指向 Skills::parsed_units_ 内单元）。失败维持跳过（现状）。
+            const int unit_idx = parse_effect_unit(effect_record.info, effect_record.args, parsed_units_);
+            if (unit_idx >= 0) {
+                Effect unit_effect;
+                unit_effect.id = effect_record.effect_id;
+                unit_effect.logic = &effect_run_parsed_unit;
+                unit_effect.args = EffectArgs(
+                    build_effect_args_for_skill(effect_record).owned_int_args,
+                    &parsed_units_[static_cast<std::size_t>(unit_idx)]
+                );
+                add_effect_node(
+                    default_branch_for_effect(effect_record.effect_id),
+                    SkillEffectNode(std::move(unit_effect), effect_register_state(effect_record.effect_id))
+                );
+            }
             continue;
         }
         add_effect_node(

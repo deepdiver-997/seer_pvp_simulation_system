@@ -233,3 +233,31 @@ StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta
     level = new_level;
     return StatChangeResult::SUCCESS;
 }
+
+HealResult heal(BattleContext* ctx, int target, int fraction_denom) {
+    if (!ctx || target < 0 || target > 1) {
+        return HealResult::INVALID_PARAM;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    const int max_hp = pet.numericalBase[NumericalPropertyIndex::HP];
+    int heal_amount = 0;
+    if (fraction_denom > 0) {
+        heal_amount = max_hp > 0 ? max_hp / fraction_denom : 0;
+    } else {
+        heal_amount = max_hp;  // 恢复全部
+    }
+    pet.hp = (pet.hp + heal_amount > max_hp) ? max_hp : pet.hp + heal_amount;
+    return HealResult::SUCCESS;
+}
+
+FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount) {
+    if (!ctx || target < 0 || target > 1 || amount < 0) {
+        return FixedDamageResult::INVALID_PARAM;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    if (pet.hp <= 0) {
+        return FixedDamageResult::TARGET_DEFEATED;
+    }
+    deal_damage(ctx, target, amount, DamageKind::FIXED, -1);
+    return FixedDamageResult::SUCCESS;
+}

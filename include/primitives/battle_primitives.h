@@ -161,4 +161,29 @@ enum class StatChangeResult {
  */
 StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta);
 
+// ----------------------------------------------------------------
+// 恢复体力 / 固定伤害
+// ----------------------------------------------------------------
+enum class HealResult {
+    SUCCESS,       // 成功恢复
+    INVALID_PARAM, // 无效参数
+};
+
+enum class FixedDamageResult {
+    SUCCESS,         // 造成固定伤害
+    TARGET_DEFEATED, // 目标已死亡
+    INVALID_PARAM,   // 无效参数
+};
+
+/**
+ * heal - 恢复目标最大体力的一定比例。
+ * fraction_denom > 0：恢复 max_hp / fraction_denom；<= 0：恢复全部。
+ */
+HealResult heal(BattleContext* ctx, int target, int fraction_denom);
+
+/**
+ * fixed_damage - 固定伤害（复用 deal_damage，吃护盾/事件）。
+ */
+FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount);
+
 #endif // BATTLE_PRIMITIVES_H

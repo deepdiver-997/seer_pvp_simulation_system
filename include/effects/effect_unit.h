@@ -15,8 +15,10 @@
 // （"{n}%令对手{...}" → Anomaly 主动作 + 概率；"未触发则" → 兜底分支），本轮先手工构造。
 
 enum class PrimitiveTag {
-    Anomaly,      // apply_anomaly：param0=anomaly_id, param1=duration_rounds
-    StatChange,   // stat_change：param0=stat, param1=delta
+    Anomaly,       // apply_anomaly：param0=anomaly_id, param1=duration_rounds
+    StatChange,    // stat_change：param0=stat, param1=delta
+    Heal,          // heal：param0=fraction_denom（>0=1/denom 最大体力；<=0=全部）
+    FixedDamage,   // fixed_damage：param0=amount（固定伤害）
 };
 
 // 原语返回值归一化的分支键。
@@ -32,11 +34,14 @@ enum class BranchKey {
 
 struct EffectUnit {
     PrimitiveTag primary_tag = PrimitiveTag::Anomaly;
-    int actor = 0;   // 主动作发起方（0/1）
-    int target = 1;  // 主动作目标（0/1）
-    int param0 = 0;  // 原语参数0（anomaly_id / stat）
+    // 相对技能持有方：0=自身, 1=对手。执行器从 args.int_args[0]（bind_participants
+    // 绑定）解析真实 owner；args 无 owner 时回退 actor 字面量。
+    int actor = 0;   // 主动作发起方（相对）
+    int target = 1;  // 主动作目标（相对：0=自身, 1=对手）
+    int param0 = 0;  // 原语参数0（anomaly_id / stat / fraction_denom / amount）
     int param1 = 0;  // 原语参数1（duration / delta）
-    int chance_arg = -1;  // 概率参数下标（EffectArgs.int_args 下标；-1=必定执行）
+    int chance_arg = -1;    // 动态概率参数下标（args.int_args 下标；-1=无）
+    int chance_value = -1;  // 字面概率（-1=必定执行；与 chance_arg 二选一，chance_value 优先）
 
     // 分支动作（递归子单元；nullptr=无动作）。chance 未触发走 on_other。
     const EffectUnit* on_success = nullptr;

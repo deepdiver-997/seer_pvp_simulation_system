@@ -8,6 +8,7 @@
 #include <vector>
 #include <db/official_data_repository.h>
 #include <effects/effect.h>
+#include <effects/effect_unit.h>
 
 // Forward declare BattleContext and State
 class BattleContext;
@@ -160,6 +161,11 @@ public:
     // 选择期效果集合：选技能时立即注册到 BATTLE_FIRST_MOVE_RIGHT 的效果。
     // 至少含基值先制（preemptive_level[owner] += priority）；条件先制效果由数据追加。
     std::vector<SkillEffectNode> selection_effects_;
+
+    // 解析出的条件效果单元（组合语法：模板 → EffectUnit）。
+    // 生命周期贯穿 Skills；通用执行器 Effect 的 args.extra 指向其中的单元。
+    // loadSkills 开头 reserve 足量防 realloc（解析器的分支指针约定）。
+    std::vector<EffectUnit> parsed_units_;
 
     // 技能可用性修饰列表：
     // 典型用途：魂印/印记带来的“PP=0 仍可释放”或“禁止无视PP”。
