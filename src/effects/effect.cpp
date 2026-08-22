@@ -49,9 +49,6 @@ bool has_dynamic_library_extension(const std::string& filename) {
 
 } // namespace
 
-Effect::Effect(int id, int priority, int owner, int lr, EffectArgs args, EffectFn logic)
-    : id(id), priority(priority), left_round(lr), owner(owner), logic(logic), args(std::move(args)) {}
-
 EffectFactory::EffectFactory() : initialized_(false) {
 }
 

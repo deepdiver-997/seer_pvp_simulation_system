@@ -133,7 +133,10 @@ using EffectFn = EffectResult (*)(BattleContext*, const EffectArgs&);
 class Effect {
 public:
     Effect() = default;
-    Effect(int id, int priority, int owner, int lr, EffectArgs args = {}, EffectFn logic = nullptr);
+    // 内联实现：插件动态库不链接 sim_core，构造函数需头文件可见。
+    Effect(int id, int priority, int owner, int lr, EffectArgs args = {}, EffectFn logic = nullptr)
+        : id(id), priority(priority), left_round(lr), owner(owner), description(),
+          logic(logic), args(std::move(args)) {}
 
     int id;
     int priority;

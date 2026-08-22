@@ -33,7 +33,8 @@ bool monster_has_skill(const official_data::MonsterRecord& monster, int skill_id
     );
 }
 
-State default_register_state_for_effect(int effect_id) {
+// 效果注册时点（后续数据化：从 effect_info / side_effect 表查 register_state 列）
+State effect_register_state(int effect_id) {
     switch (effect_id) {
         case 6:
         case 8:
@@ -41,6 +42,21 @@ State default_register_state_for_effect(int effect_id) {
         default:
             return State::BATTLE_FIRST_SKILL_EFFECT;
     }
+}
+
+// 基值先制效果模板：MOVE_RIGHT 时点给 owner 的先手权累加 priority。
+// Args: [owner(0), target(1), priority(2)]（bind_participants 会填 owner/target）
+EffectResult effect_apply_base_priority(BattleContext* ctx, const EffectArgs& args) {
+    if (!ctx || !args.int_args || args.int_count < 3) {
+        return EffectResult::kOk;
+    }
+    const int owner = args.int_args[0];
+    const int priority = args.int_args[2];
+    if (owner < 0 || owner > 1) {
+        return EffectResult::kOk;
+    }
+    ctx->ws.preemptive_level[owner] += priority;
+    return EffectResult::kOk;
 }
 
 /**
@@ -117,13 +133,20 @@ bool Skills::loadSkills() {
         }
         add_effect_node(
             default_branch_for_effect(effect_record.effect_id),
-            SkillEffectNode(std::move(effect), default_register_state_for_effect(effect_record.effect_id))
+            SkillEffectNode(std::move(effect), effect_register_state(effect_record.effect_id))
         );
     }
 
-    // 基值先制不走 selection_effects_：on_selected 里直接累加 priority 字段。
-    // selection_effects_ 留给条件先制效果（如"对手有护盾则先制+1"），
-    // 由数据/插件在技能构造后追加，on_selected 统一注册到 MOVE_RIGHT 时点。
+    // 基值先制也作为一条选择期效果数据放进 selection_effects_：
+    // on_selected 统一遍历注册到 MOVE_RIGHT 时点（即使本回合被控导致出招失败也生效）。
+    // 条件先制效果（如"对手有护盾则先制+1"）由数据/插件在此之后追加。
+    Effect base_priority_effect;
+    base_priority_effect.id = 0;
+    base_priority_effect.logic = &effect_apply_base_priority;
+    base_priority_effect.args = EffectArgs(std::vector<int>{0, 1, priority});
+    selection_effects_.push_back(
+        SkillEffectNode(std::move(base_priority_effect), State::BATTLE_FIRST_MOVE_RIGHT)
+    );
     return true;
 }
 
@@ -194,24 +217,27 @@ void Skills::on_selected(BattleContext* ctx, int owner) {
     if (!ctx || owner < 0 || owner > 1) {
         return;
     }
-    // 基值先制：立即累加到先手权（即使本回合被控导致出招失败也生效）
-    ctx->ws.preemptive_level[owner] += priority;
-
-    // 条件先制效果：注册到 MOVE_RIGHT 时点，由数据/插件填充
+    // 选择期效果统一注册到 MOVE_RIGHT 时点（含基值先制 + 条件先制）。
+    // 走 registerEffect 统一处理（valid_id 绑定 + 同源去重），source_id = 技能 id。
     for (const SkillEffectNode& node : selection_effects_) {
         Effect effect = node.effect;
         if (!effect.logic) {
             continue;
         }
+        // 绑定参与者：args[0]=owner, args[1]=1-owner
+        if (effect.args.owned_int_args.size() >= 2) {
+            effect.args.owned_int_args[0] = owner;
+            effect.args.owned_int_args[1] = 1 - owner;
+            effect.args.refresh_views();
+        }
         // left_round==0 的一次性效果归一化为本回合有效（同 continuousEffect.cpp 规则）
         const int left_round = effect.left_round;
         const int duration = (left_round < 0) ? -1 : (left_round == 0 ? 1 : left_round);
-        ++ctx->active_round_effects[owner];
-        auto ce = std::make_unique<ContinuousEffectFromEffect>(
+        auto ce = std::make_unique<ContinuousEffect>(
             effect, State::BATTLE_FIRST_MOVE_RIGHT, owner, duration, ctx->roundCount
         );
-        ce->valid_id_ = ctx->round_effect_valid_id[owner];
-        ctx->skills_effects[State::BATTLE_FIRST_MOVE_RIGHT][owner].push_back(std::move(ce));
+        ce->source_id_ = id;  // 技能 id 作为来源，同源去重
+        ctx->registerEffect(State::BATTLE_FIRST_MOVE_RIGHT, owner, std::move(ce), EffectContainer::Skill);
     }
 }
 

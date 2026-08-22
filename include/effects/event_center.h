@@ -27,7 +27,7 @@ enum class EventType {
     EVENT_ENTER_STAGE,       // 上场
     EVENT_SWAP,              // 换宠
     EVENT_OPPONENT_DEFEATED, // 击败对手
-    EVENT_SKILL_INVALID,     // 技能无效/未命中（SkillExecutionEffect 中 emit，target = 对方）
+    EVENT_SKILL_INVALID,     // 技能无效/未命中（Skills::execute 中 emit，target = 对方）
     EVENT_ATTACK_BLOCKED,    // 攻击被拦下/归零（apply_resolved_damage 中 final<=0 时 emit）
 };
 
@@ -56,12 +56,21 @@ struct BattleEvent {
  * - duration_rounds == 0 永久；>0 窗口（register_round 起算）。
  * - once == true 触发一次后自动移除（断回合补偿的语义）。
  */
+
+// 监听器作用域（与 ContinuousEffect 的 EffectScope 语义一致，独立定义避免跨头耦合）
+enum class WatcherScope {
+    ON_STAGE,  // 当前场上精灵：切换作废
+    TEAM,      // 全队绑定：切换保留，不可被清回合类作废
+};
+
 struct EventWatcher {
     EventType type;
     int owner;                                    // 谁注册的（回调里 self 视角）
     int register_round;
     int duration_rounds;                          // 0 = 永久
     bool once;
+    WatcherScope scope_ = WatcherScope::ON_STAGE;
+    int valid_id_ = 0;   // 注册时从 BattleContext::watcher_valid_id[owner] 复制，切换作废用
     std::function<void(BattleContext*, const BattleEvent&)> fn;
 };
 
@@ -92,9 +101,12 @@ public:
      * @return watcher_id     用于 remove_watcher 手动注销
      */
     int register_watcher(EventType type, int owner, int register_round, int duration_rounds,
-                         bool once, std::function<void(BattleContext*, const BattleEvent&)> fn) {
+                         bool once, std::function<void(BattleContext*, const BattleEvent&)> fn,
+                         WatcherScope scope = WatcherScope::ON_STAGE,
+                         int valid_id = 0) {
         const int id = next_id_++;
-        watchers_.emplace(id, EventWatcher{type, owner, register_round, duration_rounds, once, std::move(fn)});
+        watchers_.emplace(id, EventWatcher{type, owner, register_round, duration_rounds,
+                                           once, scope, valid_id, std::move(fn)});
         by_type_[type].push_back(id);
         return id;
     }
@@ -131,6 +143,10 @@ public:
      * @param current_round 当前回合（窗口过期判定）
      */
     void drain(BattleContext* ctx, int current_round) {
+        drain(ctx, current_round, nullptr);
+    }
+    // 重载：额外传入监听器版本号（切换作废判定用；nullptr = 不检查切换作废）
+    void drain(BattleContext* ctx, int current_round, const int* watcher_valid_id) {
         if (pending_.empty()) {
             return;
         }
@@ -142,7 +158,7 @@ public:
             std::deque<BattleEvent> wave = std::move(pending_);
             pending_.clear();
             for (const BattleEvent& event : wave) {
-                deliver(ctx, current_round, event);
+                deliver(ctx, current_round, event, watcher_valid_id);
             }
         }
         draining_ = false;
@@ -156,14 +172,18 @@ public:
     }
 
     /**
-     * cleanup - 移除窗口已过的 watcher。
+     * cleanup - 移除窗口已过 或 被切换作废的 watcher。
      * 由 BattleContext::cleanup_expired_effects 在回合扣减点统一调用。
      */
-    void cleanup(int current_round) {
+    void cleanup(int current_round, const int* watcher_valid_id = nullptr) {
         for (auto it = watchers_.begin(); it != watchers_.end();) {
             const EventWatcher& watcher = it->second;
-            if (watcher.duration_rounds > 0
-                && current_round - watcher.register_round >= watcher.duration_rounds) {
+            const bool window_expired = watcher.duration_rounds > 0
+                && current_round - watcher.register_round >= watcher.duration_rounds;
+            const bool switch_invalidated = (watcher_valid_id != nullptr)
+                && watcher.scope_ == WatcherScope::ON_STAGE
+                && watcher.valid_id_ != watcher_valid_id[watcher.owner];
+            if (window_expired || switch_invalidated) {
                 const int id = it->first;
                 const EventType type = watcher.type;
                 it = watchers_.erase(it);
@@ -199,7 +219,9 @@ public:
 
 private:
     // 把单个事件投递给其类型的所有 watcher。
-    void deliver(BattleContext* ctx, int current_round, const BattleEvent& event) {
+    // watcher_valid_id: 监听器版本号数组（切换作废判定）；nullptr = 不检查
+    void deliver(BattleContext* ctx, int current_round, const BattleEvent& event,
+                 const int* watcher_valid_id) {
         auto it = by_type_.find(event.type);
         if (it == by_type_.end()) {
             return;
@@ -215,6 +237,12 @@ private:
             if (watcher.duration_rounds > 0
                 && current_round - watcher.register_round >= watcher.duration_rounds) {
                 continue;  // 窗口已过，等待 cleanup 移除
+            }
+            // ON_STAGE 监听器：切换作废（valid_id 不匹配则跳过）
+            if (watcher.scope_ == WatcherScope::ON_STAGE
+                && watcher_valid_id != nullptr
+                && watcher.valid_id_ != watcher_valid_id[watcher.owner]) {
+                continue;
             }
             if (watcher.fn) {
                 watcher.fn(ctx, event);

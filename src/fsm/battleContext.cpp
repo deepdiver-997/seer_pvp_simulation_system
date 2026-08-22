@@ -6,8 +6,20 @@
 
 namespace {
 
-using EffectBucket = std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>>;
+using EffectBucket = std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>>;
 using PendingBucket = std::unordered_map<State, std::array<std::vector<std::unique_ptr<PendingEffect>>, 2>>;
+
+// 效果桶 key：同源去重用 (source_id << 32) | effect_id；
+// source_id==0（无来源）用全局自增唯一 key，不参与去重。
+uint64_t effect_key(const ContinuousEffect& effect) {
+    if (effect.source_id_ > 0) {
+        const int eid = effect.getEffectId();
+        const uint64_t lo = static_cast<uint32_t>(eid > 0 ? eid : 0);
+        return (static_cast<uint64_t>(effect.source_id_) << 32) | lo;
+    }
+    static uint64_t counter = 1;
+    return counter++;
+}
 
 constexpr std::array<State, 40> kLinearStateOrder = {
     State::GAME_START,
@@ -75,10 +87,13 @@ void execute_bucket_actions(EffectBucket& bucket, int robotId, State state, int 
     }
 
     auto& robotEffects = state_it->second[robotId];
-    for (auto& effect : robotEffects) {
-        // 回合类效果：检查是否被断回合（valid_id 版本号不匹配）
-        if (effect->isRoundEffect() && effect->valid_id_ != ctx->round_effect_valid_id[robotId]) {
-            continue;  // 已被断回合失效，跳过执行，等待统一清理
+    for (auto& [key, effect] : robotEffects) {
+        (void)key;
+        // ON_STAGE 效果：检查是否被断回合/切换作废（valid_id 版本号不匹配）
+        // TEAM 效果不检查版本号 → 切换/清回合类不失效
+        if (effect->scope_ == EffectScope::ON_STAGE
+            && effect->valid_id_ != ctx->round_effect_valid_id[robotId]) {
+            continue;  // 已被作废，跳过执行，等待统一清理
         }
         if (!effect->isExpired(roundCount)) {
             (*effect)(ctx);
@@ -237,9 +252,21 @@ void BattleContext::registerEffect(State trigger, int owner, std::unique_ptr<Con
                                    EffectContainer container) {
     if (effect->isRoundEffect()) {
         ++active_round_effects[owner];
-        effect->valid_id_ = round_effect_valid_id[owner];
     }
-    bucket_for(this, container)[trigger][owner].push_back(std::move(effect));
+    // 所有效果绑 valid_id_（不仅回合类）：切换精灵时次数类 ON_STAGE 效果也能惰性作废
+    effect->valid_id_ = round_effect_valid_id[owner];
+
+    auto& map = bucket_for(this, container)[trigger][owner];
+    const uint64_t key = effect_key(*effect);
+    // 同源去重：map 内已有同 key 旧效果 → 覆盖。旧效果若为回合类，扣回计数器。
+    auto it = map.find(key);
+    if (it != map.end() && it->second->isRoundEffect()) {
+        --active_round_effects[owner];
+        if (active_round_effects[owner] < 0) {
+            active_round_effects[owner] = 0;
+        }
+    }
+    map[key] = std::move(effect);
 }
 
 void BattleContext::registerPendingEffect(State observeState, int owner, std::unique_ptr<PendingEffect> effect) {
@@ -269,23 +296,33 @@ void BattleContext::cleanup_expired_effects() {
                 auto& effects = per_player[p];
                 if (effects.empty()) continue;
 
-                int removed = 0;
-                for (const auto& e : effects) {
+                int removed_round = 0;
+                for (const auto& [key, e] : effects) {
+                    (void)key;
                     if (!e->isRoundEffect()) continue;
                     if (e->isExpired(roundCount)
-                        || e->valid_id_ != round_effect_valid_id[p]) {
-                        ++removed;
+                        || (e->scope_ == EffectScope::ON_STAGE
+                            && e->valid_id_ != round_effect_valid_id[p])) {
+                        ++removed_round;
                     }
                 }
 
+                // 清理：
+                // - 回合类：过期 或（ON_STAGE 且被作废）
+                // - 非回合 ON_STAGE：被作废（切换后次数类效果也要移除）
                 std::erase_if(effects,
-                              [this, p](const std::unique_ptr<ContinuousEffect>& e) {
-                                  if (!e->isRoundEffect()) return false;
-                                  return e->isExpired(roundCount)
-                                      || e->valid_id_ != round_effect_valid_id[p];
+                              [this, p](const auto& kv) {
+                                  const auto& e = kv.second;
+                                  if (e->isRoundEffect()) {
+                                      return e->isExpired(roundCount)
+                                          || (e->scope_ == EffectScope::ON_STAGE
+                                              && e->valid_id_ != round_effect_valid_id[p]);
+                                  }
+                                  return e->scope_ == EffectScope::ON_STAGE
+                                      && e->valid_id_ != round_effect_valid_id[p];
                               });
 
-                active_round_effects[p] -= removed;
+                active_round_effects[p] -= removed_round;
                 if (active_round_effects[p] < 0) active_round_effects[p] = 0;
             }
         }
@@ -295,7 +332,8 @@ void BattleContext::cleanup_expired_effects() {
     cleanup_bucket(soul_mark_effects);
 
     // 清理过期的断回合补偿 watcher（事件中心统一管理生命周期）
-    event_center_.cleanup(roundCount);
+    // 传 watcher_valid_id 供 cleanup 检查 ON_STAGE 监听器是否被切换作废
+    event_center_.cleanup(roundCount, watcher_valid_id);
 
     // 清理窗口已过的免疫 Provider
     immunity_center_.cleanup(roundCount);
@@ -313,6 +351,7 @@ void BattleContext::invalidate_all_round_effects(int robotId) {
 int BattleContext::register_break_callback(int owner, int duration_rounds,
                                            std::function<void(BattleContext*)> fn) {
     if (owner < 0 || owner > 1) return -1;
+    // ON_STAGE 监听器：绑定当前 watcher_valid_id[owner]，切换精灵时作废（补偿不继承给新精灵）
     return event_center_.register_watcher(
         EventType::EVENT_BREAK,
         owner,
@@ -324,7 +363,9 @@ int BattleContext::register_break_callback(int owner, int duration_rounds,
                 return;  // 只有自己被断才触发
             }
             fn(ctx);
-        });
+        },
+        WatcherScope::ON_STAGE,
+        watcher_valid_id[owner]);
 }
 
 void BattleContext::remove_break_callback(int owner, int callback_id) {
@@ -398,7 +439,8 @@ bool BattleContext::hasEffect(State trigger, int owner) const {
         if (it == bucket.end()) {
             return false;
         }
-        for (const auto& effect : it->second.at(owner)) {
+        for (const auto& [key, effect] : it->second.at(owner)) {
+            (void)key;
             if (effect->getEffectId() == EffectId && !effect->isExpired(roundCount)) {
                 return true;
             }
@@ -422,11 +464,17 @@ bool BattleContext::consumeEffect(State trigger, int opponent) {
     auto it = bucket.find(trigger);
     if (it == bucket.end()) return false;
     auto& oppEffects = it->second[opponent];
-    for (auto& effect : oppEffects) {
+    for (auto& [key, effect] : oppEffects) {
+        (void)key;
         if (effect->getEffectId() == EffectId && !effect->isExpired(roundCount)) {
             bool consumed = effect->consume(this);
-            if (effect->isExpired(roundCount)) {
-                std::erase_if(oppEffects, [this](auto& e) { return e->isExpired(roundCount); });
+            // 清理所有已过期条目（map 惰性删除）
+            for (auto mit = oppEffects.begin(); mit != oppEffects.end();) {
+                if (mit->second->isExpired(roundCount)) {
+                    mit = oppEffects.erase(mit);
+                } else {
+                    ++mit;
+                }
             }
             return consumed;
         }
@@ -849,7 +897,7 @@ std::string BattleContext::getFullStateJson() const {
 
     // Effects tables
     auto append_effect_table = [&](std::ostringstream& oss,
-                                    const std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>>& bucket) {
+                                    const std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>>& bucket) {
         oss << "{";
         bool first_state = true;
         for (const auto& [state, per_player] : bucket) {
@@ -863,8 +911,9 @@ std::string BattleContext::getFullStateJson() const {
                 oss << "\"player\":" << p << ",";
                 oss << "\"count\":" << per_player[p].size() << ",";
                 oss << "\"effects\":[";
-                for (size_t ei = 0; ei < per_player[p].size(); ++ei) {
-                    const auto& eff = per_player[p][ei];
+                size_t ei = 0;
+                for (const auto& [key, eff] : per_player[p]) {
+                    (void)key;
                     oss << "{"
                         << "\"effectId\":" << eff->getEffectId() << ","
                         << "\"owner\":" << eff->owner() << ","
@@ -873,6 +922,7 @@ std::string BattleContext::getFullStateJson() const {
                         << "\"registeredRound\":" << eff->getRegisteredRound();
                     oss << "}";
                     if (ei + 1 < per_player[p].size()) oss << ",";
+                    ++ei;
                 }
                 oss << "]}";
             }

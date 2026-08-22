@@ -158,9 +158,9 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
         return;
     }
 
-    SkillExecutionEffect executor(robot_id, skill_index, trigger_state);
-    executor(ctx);
-    write_skill_resolution(ctx, robot_id, executor.getLastResult(), executor.getLastResolutionFlags());
+    Skills& skill = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]].skills[skill_index];
+    const auto [result, flags] = skill.execute(ctx, robot_id, trigger_state);
+    write_skill_resolution(ctx, robot_id, result, flags);
 }
 
 void clear_damage_snapshot(DamageSnapshot& snapshot) {

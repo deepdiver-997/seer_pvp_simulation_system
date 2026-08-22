@@ -174,6 +174,12 @@ public:
     // 断回合时 ++round_effect_valid_id[robotId] 即可使所有旧效果失效
     int round_effect_valid_id[2]{1, 1};  // 从 1 开始，避免和默认初始化的 0 混淆
 
+    //--- 监听器版本号（epoch，用于 O(1) 切换作废监听器）---
+    // 注册 watcher 时 watcher.valid_id_ = watcher_valid_id[owner]
+    // 切换精灵时 ++watcher_valid_id[owner] 使该方所有 ON_STAGE 监听器失效（补偿不继承给新精灵）
+    // 断回合不递增此号 → 被断补偿监听器在断回合后仍然存活（等响应本次断）
+    int watcher_valid_id[2]{1, 1};
+
     //--- 事件通道内核 ---
     // 全 context 唯一的事件中心。原语成功路径末尾 emit，FSM 在 State 桶后 drain 投递。
     // 断回合补偿 = 监听 EVENT_BREAK 的 watcher（经 register_break_callback 注册）。
@@ -201,10 +207,12 @@ public:
     std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
 
     //--- 技能效果执行表 ---
-    std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>> skills_effects;
+    // 内层用 std::map<uint64_t, ...>：key = (source_id << 32) | effect_id，
+    // 同源同 effect 新注册自动覆盖旧（同源去重）；source_id==0 用唯一自增 key 不参与去重。
+    std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>> skills_effects;
 
     //--- 魂印效果执行表 ---
-    std::unordered_map<State, std::array<std::vector<std::unique_ptr<ContinuousEffect>>, 2>> soul_mark_effects;
+    std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>> soul_mark_effects;
 
     //--- 被动效果表 ---
     std::array<std::map<int, ContinuousEffect*>, 2> passiveEffects;
@@ -294,6 +302,18 @@ public:
 
     //--- 回合结束 ---
     void advanceRound() { ++roundCount; }
+
+    //--- 切换/清场 ---
+    // 使某方所有 ON_STAGE 效果惰性失效（切换精灵/清场用）。
+    // 通过递增版本号实现：旧 ON_STAGE 效果 valid_id_ 不匹配 → 执行时跳过 + cleanup 移除。
+    // TEAM 效果不受影响（scope_ == TEAM 不检查 valid_id_）。
+    // 切换同时递增监听器版本号 → 该方 ON_STAGE 监听器（含被断补偿）一并作废，
+    // 不继承给下一个登场精灵。
+    void invalidate_on_stage_effects(int owner) {
+        ++round_effect_valid_id[owner];
+        ++watcher_valid_id[owner];
+        active_round_effects[owner] = 0;  // ON_STAGE 回合效果已全部失效，清计数器
+    }
 
     //--- 清空效果 ---
     void clearAllEffects() {

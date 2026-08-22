@@ -103,7 +103,18 @@ public:
     void on_selected(BattleContext* ctx, int owner);
     // 执行期（先手权判定后、轮到出手时）：本次使用能否成功（miss/封效果）
     SkillUsageResult query_usage(BattleContext* ctx, int owner);
+    // 执行期主流程：命中/无效判定 → 注册对应分支效果到各时点桶。
+    // 返回结果 + resolution flags（FSM 写回 workspace 供后续时点判断）。
+    std::pair<SkillExecResult, SkillResolutionFlags> execute(BattleContext* ctx, int owner, State trigger_state);
 
+private:
+    // 命中效果失效判定（当前空桩，后续接"白板/效果失效保留伤害"两种变体）
+    bool is_hit_effect_invalid(BattleContext* ctx, int owner) const;
+    // 把某结果分支下的效果节点注册到对应时点桶
+    void register_branch(BattleContext* ctx, int owner, SkillExecResult result,
+                         const SkillResolutionFlags& flags);
+
+public:
     bool is_locked = false;
     int maxPP;
     int pp;  // pp == -1 -> 技能使用无限制

@@ -80,111 +80,85 @@ int duration_for_effect(int left_round) {
 
 } // namespace
 
-// ContinuousEffectFromEffect
-ContinuousEffectFromEffect::ContinuousEffectFromEffect(Effect e, State trigger, int owner, int duration, int registeredRound)
-    : ContinuousEffect(owner)
-    , effect_(std::move(e))
-    , triggerState_(trigger)
-    , registered_round_(registeredRound)
-    , duration_rounds_(duration) {}
-
-bool ContinuousEffectFromEffect::operator()(BattleContext* ctx) {
-    if (isExpired(ctx->roundCount) || !effect_.logic) return false;
-
-    effect_.logic(ctx, effect_.args);
-    return true;
-}
-
-bool ContinuousEffectFromEffect::isExpired(int currentRound) const {
-    if (duration_rounds_ < 0) return false;  // 永久效果
-    return currentRound - registered_round_ >= duration_rounds_;
-}
-
-// SkillExecutionEffect
-SkillExecutionEffect::SkillExecutionEffect(int owner, int skillIndex, State trigger)
-    : ContinuousEffect(owner)
-    , owner_(owner)
-    , skillIndex_(skillIndex)
-    , triggerState_(trigger)
-    , lastSkillResult_(SkillExecResult::SKILL_INVALID)
-    , lastResolutionFlags_(resolution_flags_for(SkillExecResult::SKILL_INVALID)) {}
-
-bool SkillExecutionEffect::operator()(BattleContext* ctx) {
-    ElfPet& pet = ctx->seerRobot[owner_].elfPets[ctx->on_stage[owner_]];
-    Skills& skill = pet.skills[skillIndex_];
+// Skills::execute — 技能执行期主流程（替代 SkillExecutionEffect）
+//
+// 流程：query_usage 判可用性（miss/封属性/封攻击）→
+//       命中效果失效判定（EFFECT_INVALID，不注册任何效果）→
+//       命中（注册 HIT 分支）→ 各分支注册效果到对应时点桶。
+std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* ctx, int owner, State trigger_state) {
+    (void)trigger_state;
+    if (!ctx || owner < 0 || owner > 1) {
+        return {SkillExecResult::SKILL_INVALID, resolution_flags_for(SkillExecResult::SKILL_INVALID)};
+    }
 
     // 执行期可用性判定（统一走 query_usage：miss + 封属性/封攻击）
-    const SkillUsageResult usage = skill.query_usage(ctx, owner_);
+    const SkillUsageResult usage = query_usage(ctx, owner);
     if (usage == SkillUsageResult::MISS || usage == SkillUsageResult::SEALED) {
-        applySkillResult(SkillExecResult::SKILL_INVALID);
-        ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner_, ctx->opponent(owner_)});
-        registerBranch(ctx, SkillExecResult::SKILL_INVALID, skill);
-        return true;
+        const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::SKILL_INVALID);
+        ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner, ctx->opponent(owner)});
+        register_branch(ctx, owner, SkillExecResult::SKILL_INVALID, flags);
+        return {SkillExecResult::SKILL_INVALID, flags};
     }
 
-    if (isHitEffectInvalid(ctx, owner_, skillIndex_)) {
-        applySkillResult(SkillExecResult::EFFECT_INVALID);
-        return true;
+    // 命中效果失效：不注册任何效果（含补偿），但允许后续走伤害管线（由 flags 控制）
+    if (is_hit_effect_invalid(ctx, owner)) {
+        const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::EFFECT_INVALID);
+        return {SkillExecResult::EFFECT_INVALID, flags};
     }
 
-    applySkillResult(SkillExecResult::HIT);
-    registerBranch(ctx, SkillExecResult::HIT, skill);
+    const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::HIT);
+    register_branch(ctx, owner, SkillExecResult::HIT, flags);
 
     // 技能命中事件（"技能命中后/受到攻击后"监听；属性技能也算命中，但无伤害量）
-    // 伤害量见 EVENT_TAKE_DAMAGE（deal_damage 发出）
-    ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner_, ctx->opponent(owner_)});
+    ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner, ctx->opponent(owner)});
 
-    return true;
+    return {SkillExecResult::HIT, flags};
 }
 
-bool SkillExecutionEffect::isHitEffectInvalid(BattleContext* ctx, int attackerId, int skillIndex) const {
+bool Skills::is_hit_effect_invalid(BattleContext* ctx, int owner) const {
     (void)ctx;
-    (void)attackerId;
-    (void)skillIndex;
+    (void)owner;
     // TODO:
-    // 这里后续接“命中效果失效”判定：
-    // - 若失效，则技能描述中的 effect 一律不注册
-    // - 但攻击伤害链是否继续，由 lastResolutionFlags_.allowAttackDamagePipeline 决定
+    // 这里后续接"命中效果失效"判定：
+    // - 若失效，则技能描述中的 effect 一律不注册（含补偿效果）
+    // - 但攻击伤害链是否继续，由返回的 allowAttackDamagePipeline 决定
+    // - 白板（无伤害无效果）vs 效果失效保留伤害（赵云"胆"）两种变体
     return false;
 }
 
-void SkillExecutionEffect::applySkillResult(SkillExecResult result) {
-    lastSkillResult_ = result;
-    lastResolutionFlags_ = resolution_flags_for(result);
-}
-
-void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult result, const Skills& skill) {
-    if (!lastResolutionFlags_.registerSkillEffects) {
+void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult result,
+                             const SkillResolutionFlags& flags) {
+    if (!flags.registerSkillEffects) {
         return;
     }
 
-    auto it = skill.effectBranches.find(result);
-    if (it == skill.effectBranches.end()) return;
+    auto it = effectBranches.find(result);
+    if (it == effectBranches.end()) return;
 
     for (const SkillEffectNode& node : it->second) {
         Effect effect = node.effect;
-        bind_participants(effect, owner_);
+        bind_participants(effect, owner);
         if (!effect.logic) continue;
 
-        const State register_state = state_for_owner(node.registerState, owner_, ctx);
-        const State pending_observe_state = state_for_owner(node.pendingObserveState, owner_, ctx);
+        const State register_state = state_for_owner(node.registerState, owner, ctx);
+        const State pending_observe_state = state_for_owner(node.pendingObserveState, owner, ctx);
         // one-shot (left_round==0) 归一化为本回合有效的 1 回合效果，否则立即过期永不执行
         const int duration = duration_for_effect(effect.left_round);
 
         if (node.usePendingTrigger) {
             ctx->registerPendingEffect(
                 pending_observe_state,
-                owner_,
+                owner,
                 std::make_unique<FutureTrigger>(
                     effect.id,
-                    owner_,
+                    owner,
                     pending_observe_state,
                     nullptr,
-                    [ctx, owner = owner_, registerState = register_state, effect, duration](BattleContext*) {
+                    [ctx, owner, registerState = register_state, effect, duration](BattleContext*) {
                         ctx->registerEffect(
                             registerState,
                             owner,
-                            std::make_unique<ContinuousEffectFromEffect>(
+                            std::make_unique<ContinuousEffect>(
                                 effect,
                                 registerState,
                                 owner,
@@ -203,11 +177,11 @@ void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult re
 
         ctx->registerEffect(
             register_state,
-            owner_,
-            std::make_unique<ContinuousEffectFromEffect>(
+            owner,
+            std::make_unique<ContinuousEffect>(
                 effect,
                 register_state,
-                owner_,
+                owner,
                 duration,
                 ctx->roundCount
             )
@@ -215,64 +189,3 @@ void SkillExecutionEffect::registerBranch(BattleContext* ctx, SkillExecResult re
     }
 }
 
-// RoundContinuousEffect
-template<int EffectId, State Trigger, int InitRounds>
-RoundContinuousEffect<EffectId, Trigger, InitRounds>::RoundContinuousEffect(int owner, int duration, int registeredRound)
-    : ContinuousEffect(owner), registered_round_(registeredRound), duration_rounds_(duration) {}
-
-template<int EffectId, State Trigger, int InitRounds>
-bool RoundContinuousEffect<EffectId, Trigger, InitRounds>::operator()(BattleContext* ctx) {
-    if (isExpired(ctx->roundCount)) return false;
-    auto effect = EffectFactory::getInstance().getEffect(EffectId, {});
-    if (effect.logic) {
-        effect.logic(ctx, effect.args);
-        return true;
-    }
-    return false;
-}
-
-template<int EffectId, State Trigger, int InitRounds>
-bool RoundContinuousEffect<EffectId, Trigger, InitRounds>::isExpired(int currentRound) const {
-    if (duration_rounds_ < 0) return false;  // 永久效果
-    return currentRound - registered_round_ >= duration_rounds_;
-}
-
-// CountContinuousEffect
-template<int EffectId, State Trigger, int InitCount>
-CountContinuousEffect<EffectId, Trigger, InitCount>::CountContinuousEffect(int owner, int count, bool decrementOnTrigger)
-    : ContinuousEffect(owner), remainingCount_(count), decrementOnTrigger_(decrementOnTrigger) {}
-
-template<int EffectId, State Trigger, int InitCount>
-bool CountContinuousEffect<EffectId, Trigger, InitCount>::operator()(BattleContext* ctx) {
-    if (isExpired(ctx->roundCount)) return false;
-    auto effect = EffectFactory::getInstance().getEffect(EffectId, {});
-    if (effect.logic) {
-        effect.logic(ctx, effect.args);
-        if (decrementOnTrigger_) {
-            --remainingCount_;
-        }
-        return true;
-    }
-    return false;
-}
-
-template<int EffectId, State Trigger, int InitCount>
-bool CountContinuousEffect<EffectId, Trigger, InitCount>::check(BattleContext* ctx) const {
-    (void)ctx;
-    return remainingCount_ > 0;
-}
-
-template<int EffectId, State Trigger, int InitCount>
-bool CountContinuousEffect<EffectId, Trigger, InitCount>::consume(BattleContext* ctx) {
-    (void)ctx;
-    if (remainingCount_ <= 0) return false;
-    --remainingCount_;
-    return true;
-}
-
-template<int EffectId, State Trigger, int InitCount>
-bool CountContinuousEffect<EffectId, Trigger, InitCount>::isExpired(int currentRound) const {
-    (void)currentRound;
-    if (remainingCount_ < 0) return false;  // 永久效果
-    return remainingCount_ <= 0;
-}
