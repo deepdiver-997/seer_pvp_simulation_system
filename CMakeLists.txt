@@ -97,6 +97,10 @@ if(BUILD_SMOKE_TEST)
     add_executable(sim_scenario_g test/scenario/scenario_g.cpp)
     target_include_directories(sim_scenario_g PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(sim_scenario_g PRIVATE sim_core)
+
+    add_executable(sim_scenario_h test/scenario/scenario_h.cpp)
+    target_include_directories(sim_scenario_h PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(sim_scenario_h PRIVATE sim_core)
 endif()
 
 if(BUILD_TRAINING_CLI)

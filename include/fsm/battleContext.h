@@ -285,6 +285,11 @@ public:
         ignore_pp[1] = false;
         pp_reverse[0] = false;
         pp_reverse[1] = false;
+        for (int p = 0; p < 2; ++p) {
+            for (ElfPet& pet : seerRobot[p].elfPets) {
+                pet.soulmark_storage.clear();  // 魂印持久槽：战斗结束/清场清空
+            }
+        }
         active_round_effects[0] = 0;
         active_round_effects[1] = 0;
         event_center_.clear_all();

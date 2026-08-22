@@ -1,8 +1,10 @@
 #ifndef ELF_PET_H
 #define ELF_PET_H
 
+#include <any>
 #include <array>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -74,6 +76,7 @@ public:
         , is_locked(other.is_locked)
         , skills(other.skills)
         , marks(other.marks)
+        , soulmark_storage(other.soulmark_storage)
         , id(other.id)
         , name(other.name) {}
 
@@ -93,6 +96,7 @@ public:
         , is_locked(other.is_locked)
         , skills(std::move(other.skills))
         , marks(std::move(other.marks))
+        , soulmark_storage(std::move(other.soulmark_storage))
         , id(other.id)
         , name(std::move(other.name)) {}
 
@@ -114,6 +118,7 @@ public:
         is_locked = other.is_locked;
         skills = other.skills;
         marks = other.marks;
+        soulmark_storage = other.soulmark_storage;
         id = other.id;
         name = other.name;
         return *this;
@@ -137,6 +142,7 @@ public:
         is_locked = other.is_locked;
         skills = std::move(other.skills);
         marks = std::move(other.marks);
+        soulmark_storage = std::move(other.soulmark_storage);
         id = other.id;
         name = std::move(other.name);
         return *this;
@@ -160,6 +166,11 @@ public:
     bool is_locked = false;
     std::array<Skills, 5> skills;
     std::vector<Mark> marks;
+
+    // 魂印持久私有存储：按魂印 id 分槽，内容由魂印自解释（引擎不关心布局）。
+    // 随 pet 对象存活 → 天然跨切换/下场保留；精灵阵亡/战斗结束随 pet 销毁。
+    // 典型用途：无相谛蓄力（万相乖离已取消条件数 + 威力提升）。
+    std::map<int, std::any> soulmark_storage;
 
     int id = -1;
     std::string name;
