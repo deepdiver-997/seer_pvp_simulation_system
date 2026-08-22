@@ -28,7 +28,9 @@ public:
     std::vector<int> kind_tags;
     // 归属精灵 id（现代魂印链路填充；0 = 未知）。
     int monster_id = 0;
-    void register_soul_effect(BattleContext* context);
+    // 激活魂印效果：把 effect 包成 ContinuousEffect 注册进魂印桶（BATTLE_ROUND_START 每回合执行）。
+    // owner = 持有方 (0/1)。此前魂印效果链从未激活（只声明未实现），这是所有魂印生效的前提。
+    void register_soul_effect(BattleContext* context, int owner);
     void unregister_soul_effect(BattleContext* context);
 };
 

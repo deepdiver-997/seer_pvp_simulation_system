@@ -89,7 +89,7 @@ public:
     // 2. 读取 side_effect + effect_info，拆出本技能的效果序列与参数
     // 3. 再按本地映射规则生成 effectBranches
     bool loadSkills();
-    bool skill_usable();
+    bool skill_usable(BattleContext* ctx = nullptr, int owner = -1);
     void register_usability_effect(int effectId, SkillUsabilityEffectType type, bool active = true);
     void set_usability_effect_active(int effectId, bool active);
     void remove_usability_effect(int effectId);

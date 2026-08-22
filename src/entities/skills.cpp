@@ -122,6 +122,10 @@ void materialize_attack_credential(BattleContext* ctx, int owner, const Skills& 
         cred.ignore_damage_limit |= grant.ignore_damage_limit;
         cred.level = std::max(cred.level, grant.level);
     }
+    // 魂印条件凭证（SET 端）：使用 PP=0 技能 + force_execute_on_pp0 → 强制执行（无为觉者 2260）。
+    if (ctx->force_execute_on_pp0[owner] && skill.pp == 0) {
+        cred.force_execute = true;
+    }
     cred.valid = cred.ignore_attack_immunity || cred.ignore_damage_limit || cred.force_execute;
 }
 
@@ -206,7 +210,7 @@ bool Skills::loadSkills() {
     return true;
 }
 
-bool Skills::skill_usable() {
+bool Skills::skill_usable(BattleContext* ctx, int owner) {
     if (is_locked) {
         return false;
     }
@@ -221,6 +225,11 @@ bool Skills::skill_usable() {
 
     if (pp < 0) {
         return false;
+    }
+
+    // PP=0：魂印 ignore_pp 信号（无为觉者 2260 等）→ 可选
+    if (ctx && owner >= 0 && owner <= 1 && ctx->ignore_pp[owner]) {
+        return true;
     }
 
     bool hasIgnorePPEffect = false;
@@ -240,13 +249,14 @@ bool Skills::skill_usable() {
 }
 
 SkillSelectionResult Skills::query_selectable(BattleContext* ctx, int owner) {
-    (void)ctx;
-    (void)owner;
     if (is_locked) {
         return SkillSelectionResult::LOCKED;
     }
     if (pp == 0) {
-        // PP=0：只有存在 active 的 IgnorePP 效果（且无 ForceRespectPP 覆盖）才可选
+        // PP=0：魂印 ignore_pp 信号优先；否则需 active 的 IgnorePP 效果（且无 ForceRespectPP 覆盖）
+        if (ctx && owner >= 0 && owner <= 1 && ctx->ignore_pp[owner]) {
+            return SkillSelectionResult::SELECTABLE;
+        }
         bool hasIgnorePPEffect = false;
         bool hasForceRespectPPEffect = false;
         for (const auto& entry : usabilityEffects) {

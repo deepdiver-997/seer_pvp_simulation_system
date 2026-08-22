@@ -1,10 +1,14 @@
 #include <entities/soul_mark_manager.h>
+#include <entities/soul_mark.h>
+#include <effects/continuousEffect.h>
+#include <fsm/battleContext.h>
 #include <utils/dynamic_library.h>
 #include <plugin/plugin_interface.h>
 
 #include <dirent.h>
 #include <array>
 #include <cstring>
+#include <vector>
 
 #if defined(_WIN32) || defined(_WIN64)
 #endif
@@ -238,4 +242,31 @@ void SoulMarkManager::registerSkillEffects(
 
 size_t SoulMarkManager::getLoadedLibraryCount() const {
     return loaded_libraries_.size();
+}
+
+// SoulMark::register_soul_effect — 激活魂印效果链（此前只声明未实现，魂印函数从未执行）。
+// 把魂印 effect 包成 ContinuousEffect（BATTLE_ROUND_START 每回合执行、ON_STAGE 作用域、
+// source_id=魂印 id 同源去重），注册进魂印桶。每回合重注册（FSM handle_BattleRoundStart 调），
+// 幂等信号类魂印（如 2260 设 force_execute_on_pp0/ignore_pp）天然正确；
+// 一次性/条件激活语义留"激活谓词"任务。
+void SoulMark::register_soul_effect(BattleContext* context, int owner) {
+    if (!context || owner < 0 || owner > 1 || !effect) {
+        return;
+    }
+    // 绑定参与者：args[0]=owner, args[1]=1-owner（魂印函数用 resolve_owner_from_args 读）。
+    std::vector<int> merged;
+    merged.push_back(owner);
+    merged.push_back(1 - owner);
+    if (args.owned_int_args.size() >= 2) {
+        for (std::size_t i = 2; i < args.owned_int_args.size(); ++i) {
+            merged.push_back(args.owned_int_args[i]);
+        }
+    }
+    Effect wrapper(id, 0, owner, /*left_round=*/-1, EffectArgs(std::move(merged)), effect);
+    auto ce = std::make_unique<ContinuousEffect>(
+        wrapper, State::BATTLE_ROUND_START, owner, /*duration=*/-1, context->roundCount
+    );
+    ce->source_id_ = id;
+    ce->scope_ = EffectScope::ON_STAGE;
+    context->registerEffect(State::BATTLE_ROUND_START, owner, std::move(ce), EffectContainer::SoulMark);
 }

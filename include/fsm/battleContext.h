@@ -221,6 +221,10 @@ public:
     };
     std::vector<PenetrationGrant> penetration_grants[2];  // [授予方]
 
+    //--- 魂印条件凭证信号（SET 端：魂印激活时设置，切换/清场清零）---
+    bool force_execute_on_pp0[2]{};  // 魂印激活：使用 PP=0 技能时必定命中+强制执行（无为觉者 2260）
+    bool ignore_pp[2]{};             // 魂印激活：PP=0 技能仍可选（不受PP限制）
+
     //--- 技能效果执行表 ---
     // 内层用 std::map<uint64_t, ...>：key = (source_id << 32) | effect_id，
     // 同源同 effect 新注册自动覆盖旧（同源去重）；source_id==0 用唯一自增 key 不参与去重。
@@ -361,6 +365,8 @@ public:
         ++watcher_valid_id[owner];
         active_round_effects[owner] = 0;  // ON_STAGE 回合效果已全部失效，清计数器
         penetration_grants[owner].clear();  // 次数型穿透授予不继承给新精灵
+        force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
+        ignore_pp[owner] = false;
     }
 
     //--- 清空效果 ---
@@ -370,6 +376,10 @@ public:
         pending_effects.clear();
         penetration_grants[0].clear();
         penetration_grants[1].clear();
+        force_execute_on_pp0[0] = false;
+        force_execute_on_pp0[1] = false;
+        ignore_pp[0] = false;
+        ignore_pp[1] = false;
         active_round_effects[0] = 0;
         active_round_effects[1] = 0;
         event_center_.clear_all();

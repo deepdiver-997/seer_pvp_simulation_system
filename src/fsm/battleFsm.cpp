@@ -499,7 +499,7 @@ void BattleFsm::operation(BattleContext* battleContext, int robotId, ActionType 
                 std::cerr << "Invalid skill index: " << index << std::endl;
                 return;
             }
-            if (pet.skills[index].skill_usable()) {
+            if (pet.skills[index].skill_usable(battleContext, robotId)) {
                 battleContext->roundChoice[robotId][0] = static_cast<int>(ActionType::SELECT_SKILL);
                 battleContext->roundChoice[robotId][1] = index;
             } else {
@@ -689,6 +689,13 @@ void BattleFsm::handle_BattleRoundStart(BattleContext* battleContext) {
         }
     }
     sync_workspace_from_on_stage(battleContext);
+    // 魂印激活（SET 端最小实现）：在场精灵魂印注册到 ROUND_START 桶，本轮即执行。
+    // 每回合重注册（同源去重），幂等信号类魂印（如 2260 设 force_execute_on_pp0/ignore_pp）天然正确；
+    // 一次性/条件激活语义留"激活谓词"任务。
+    for (int i = 0; i < 2; ++i) {
+        ElfPet& pet = battleContext->seerRobot[i].elfPets[battleContext->on_stage[i]];
+        pet.soulMark.register_soul_effect(battleContext, i);
+    }
     battleContext->execute_registered_actions(-1, State::BATTLE_ROUND_START);
     battleContext->generateState();
 }
