@@ -19,6 +19,23 @@ enum class PrimitiveTag {
     StatChange,    // stat_change：param0=stat, param1=delta
     Heal,          // heal：param0=fraction_denom（>0=1/denom 最大体力；<=0=全部）
     FixedDamage,   // fixed_damage：param0=amount（固定伤害）
+    // 第二刀（组合语法：无相谛 5 类条件模板）
+    PpReduce,           // pp_reduce：param0=每技能减 N 点 PP
+    RemoveRoundEffects, // remove_round_effects（消除目标回合类效果，复用 break_round_effects）
+    DrainHp,            // drain_hp：param0=fraction_denom（吸取目标 max_hp/denom 固定伤害+自身恢复等量）
+    Kill,               // kill：目标体力归 0（秒杀）
+    PowerBoost,         // 改 ws.skill_power_view[actor] += param0（技能威力视图层，非原语）
+};
+
+// 前置条件（执行主动作前求值；不满足则效果不触发，走 on_other/无动作）。
+enum class UnitCondition {
+    None,           // 无条件
+    SameElement,    // 双方主元素属性相同
+    FirstMove,      // 本回合先出手（当前执行状态是 FIRST 系列）
+    SecondMove,     // 本回合后出手（SECOND 系列）
+    TargetNoAnomaly,// 目标不处于任何异常状态
+    TargetHasAnomaly, // 目标处于至少一个异常状态
+    TargetHpBelow,  // 目标当前体力 < condition_param
 };
 
 // 原语返回值归一化的分支键。
@@ -43,7 +60,11 @@ struct EffectUnit {
     int chance_arg = -1;    // 动态概率参数下标（args.int_args 下标；-1=无）
     int chance_value = -1;  // 字面概率（-1=必定执行；与 chance_arg 二选一，chance_value 优先）
 
-    // 分支动作（递归子单元；nullptr=无动作）。chance 未触发走 on_other。
+    // 前置条件（第二刀）：不满足则效果不触发（走 on_other/无动作），先于概率 roll。
+    UnitCondition condition = UnitCondition::None;
+    int condition_param = 0;  // TargetHpBelow 阈值等
+
+    // 分支动作（递归子单元；nullptr=无动作）。chance 未触发/条件不满足走 on_other。
     const EffectUnit* on_success = nullptr;
     const EffectUnit* on_immune = nullptr;   // Type B：被免疫 → 补偿
     const EffectUnit* on_blocked = nullptr;

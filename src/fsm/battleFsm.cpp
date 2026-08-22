@@ -170,6 +170,9 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
     }
 
     Skills& skill = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]].skills[skill_index];
+    // 技能威力视图层：本次攻击的威力打底物化到 ws，效果（SKILL_EFFECT 时点）可改，
+    // ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值（见 battleWorkspace.h）。
+    ctx->ws.skill_power_view[robot_id] = skill.power;
     const auto [result, flags] = skill.execute(ctx, robot_id, trigger_state);
     write_skill_resolution(ctx, robot_id, result, flags);
 }

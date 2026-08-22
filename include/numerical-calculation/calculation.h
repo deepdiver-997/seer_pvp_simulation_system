@@ -16,7 +16,10 @@ class Calculation {
         double damage = 0.0;
         double Attack = ws.getTempAbilityValue(attacker, static_cast<NumericalPropertyIndex>(skill.type));
         double Defense = ws.getTempAbilityValue(defender, static_cast<NumericalPropertyIndex>(static_cast<int>(skill.type) + 2));
-        damage = (0.84 * Attack / Defense * skill.power + 2)
+        // 技能威力视图层：ws.skill_power_view（效果可改，如威力提升/随机威力）优先，
+        // 未物化(0)回退技能静态 power。
+        const int power = ws.skill_power_view[attacker] > 0 ? ws.skill_power_view[attacker] : skill.power;
+        damage = (0.84 * Attack / Defense * power + 2)
                 * calculateRestraintMultiples(ws.view_elementalAttributes[attacker], ws.view_elementalAttributes[defender])
                 * (217 + rand() % 39) / 255;
         if(involve(ws.view_elementalAttributes[attacker], skill.element)) {

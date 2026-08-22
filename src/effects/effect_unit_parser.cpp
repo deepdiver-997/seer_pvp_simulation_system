@@ -130,27 +130,91 @@ int parse_fallback_unit(const std::string& text, const std::vector<int>& skill_a
     return -1;
 }
 
+// 第二刀：无相谛 5 类条件模板（"条件 → 动作"结构，一次填好 condition + primary_tag）。
+// 匹配失败返回 false（维持跳过）。
+bool parse_second_pass_unit(const std::string& text, const std::vector<int>& skill_args,
+                            EffectUnit& unit) {
+    // 1) 179：若属性相同则技能威力提升{n} → SameElement + PowerBoost
+    if (text.find("若属性相同") != std::string::npos
+        && text.find("威力提升") != std::string::npos) {
+        unit.primary_tag = PrimitiveTag::PowerBoost;
+        unit.condition = UnitCondition::SameElement;
+        unit.target = 1;  // 条件比较双方元素；动作作用于 actor（自身技能威力）
+        unit.param0 = arg_at(skill_args, find_placeholder(text, 0));
+        return unit.param0 > 0;
+    }
+    // 2) 700：先出手时降低对手所有PP{n}点 → FirstMove + PpReduce
+    if (text.find("先出手") != std::string::npos
+        && text.find("降低对手所有PP") != std::string::npos) {
+        unit.primary_tag = PrimitiveTag::PpReduce;
+        unit.condition = UnitCondition::FirstMove;
+        unit.target = 1;
+        unit.param0 = arg_at(skill_args, find_placeholder(text, 0));
+        return unit.param0 > 0;
+    }
+    // 3) 1083：若后出手则消除对手回合类效果 → SecondMove + RemoveRoundEffects
+    if (text.find("若后出手") != std::string::npos
+        && text.find("消除对手回合类") != std::string::npos) {
+        unit.primary_tag = PrimitiveTag::RemoveRoundEffects;
+        unit.condition = UnitCondition::SecondMove;
+        unit.target = 1;
+        return true;
+    }
+    // 4) 1257：对手不处于异常状态则吸取对手最大体力的1/{n} → TargetNoAnomaly + DrainHp
+    if (text.find("不处于异常状态") != std::string::npos
+        && text.find("吸取对手最大体力") != std::string::npos) {
+        unit.primary_tag = PrimitiveTag::DrainHp;
+        unit.condition = UnitCondition::TargetNoAnomaly;
+        unit.target = 1;
+        const std::size_t frac = text.find("1/");
+        if (frac != std::string::npos) {
+            unit.param0 = arg_at(skill_args, find_placeholder(text, frac));
+        }
+        return unit.param0 > 0;
+    }
+    // 5) 456：若对手体力不足{n}则直接秒杀 → TargetHpBelow + Kill
+    if (text.find("若对手体力不足") != std::string::npos
+        && text.find("直接秒杀") != std::string::npos) {
+        unit.primary_tag = PrimitiveTag::Kill;
+        unit.condition = UnitCondition::TargetHpBelow;
+        unit.target = 1;
+        unit.condition_param = arg_at(skill_args, find_placeholder(text, text.find("若对手体力不足")));
+        return unit.condition_param > 0;
+    }
+    return false;
+}
+
 }  // namespace
 
 int parse_effect_unit(const std::string& info, const std::vector<int>& skill_args,
                       std::vector<EffectUnit>& storage) {
     EffectUnit primary;
     std::size_t consumed = 0;
-    if (!parse_status_inflict_primary(info, skill_args, primary, consumed)) {
-        return -1;
-    }
-    storage.push_back(primary);
-    const int root_idx = static_cast<int>(storage.size()) - 1;
-
-    // 未触发兜底：切 "，[若]未触发则" 之后的子句（"若未触发则" 含 "未触发则"）。
-    const std::string remainder = info.substr(consumed);
-    const std::size_t wf = remainder.find("未触发则");
-    if (wf != std::string::npos) {
-        const std::string fallback_text = remainder.substr(wf + 4);
-        const int fallback_idx = parse_fallback_unit(fallback_text, skill_args, storage);
-        if (fallback_idx >= 0) {
-            storage[root_idx].on_other = &storage[fallback_idx];  // 概率未触发 → 兜底
+    if (parse_status_inflict_primary(info, skill_args, primary, consumed)) {
+        // 1248 类"对手处于异常状态时{n}%令对手{状态}"：补前置条件（与 1257"无异常吸取"互斥）。
+        if (info.find("对手处于异常状态") != std::string::npos) {
+            primary.condition = UnitCondition::TargetHasAnomaly;
         }
+        storage.push_back(primary);
+        const int root_idx = static_cast<int>(storage.size()) - 1;
+
+        // 未触发兜底：切 "，[若]未触发则" 之后的子句（"若未触发则" 含 "未触发则"）。
+        const std::string remainder = info.substr(consumed);
+        const std::size_t wf = remainder.find("未触发则");
+        if (wf != std::string::npos) {
+            const std::string fallback_text = remainder.substr(wf + 4);
+            const int fallback_idx = parse_fallback_unit(fallback_text, skill_args, storage);
+            if (fallback_idx >= 0) {
+                storage[root_idx].on_other = &storage[fallback_idx];  // 概率未触发 → 兜底
+            }
+        }
+        return root_idx;
     }
-    return root_idx;
+
+    // 第二刀：5 类条件模板（无相谛 179/700/1083/1257/456）。
+    if (parse_second_pass_unit(info, skill_args, primary)) {
+        storage.push_back(primary);
+        return static_cast<int>(storage.size()) - 1;
+    }
+    return -1;
 }

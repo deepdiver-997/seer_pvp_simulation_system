@@ -261,3 +261,65 @@ FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount) {
     deal_damage(ctx, target, amount, DamageKind::FIXED, -1);
     return FixedDamageResult::SUCCESS;
 }
+
+PpReduceResult pp_reduce(BattleContext* ctx, int target, int amount) {
+    if (!ctx || target < 0 || target > 1 || amount <= 0) {
+        return PpReduceResult::INVALID_PARAM;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    bool changed = false;
+    for (Skills& skill : pet.skills) {
+        if (skill.pp == -1) {
+            continue;  // 无限 PP 不参与
+        }
+        const int before = skill.pp;
+        skill.pp = std::max(0, skill.pp - amount);
+        if (skill.pp != before) {
+            changed = true;
+        }
+    }
+    return changed ? PpReduceResult::SUCCESS : PpReduceResult::INVALID_PARAM;
+}
+
+RemoveRoundEffectsResult remove_round_effects(BattleContext* ctx, int target) {
+    if (!ctx || target < 0 || target > 1) {
+        return RemoveRoundEffectsResult::INVALID_PARAM;
+    }
+    switch (break_round_effects(ctx, target)) {
+        case BreakResult::SUCCESS:    return RemoveRoundEffectsResult::SUCCESS;
+        case BreakResult::NO_EFFECTS: return RemoveRoundEffectsResult::NONE;
+        case BreakResult::IMMUNE:     return RemoveRoundEffectsResult::IMMUNE;
+    }
+    return RemoveRoundEffectsResult::INVALID_PARAM;
+}
+
+DrainHpResult drain_hp(BattleContext* ctx, int actor, int target, int fraction_denom) {
+    if (!ctx || actor < 0 || actor > 1 || target < 0 || target > 1
+        || fraction_denom <= 0 || actor == target) {
+        return DrainHpResult::INVALID_PARAM;
+    }
+    ElfPet& defender = ctx->getPet(target);
+    if (defender.hp <= 0) {
+        return DrainHpResult::TARGET_DEFEATED;
+    }
+    const int max_hp = std::max(1, defender.numericalProperties[NumericalPropertyIndex::HP]);
+    const int amount = std::max(1, max_hp / fraction_denom);
+    deal_damage(ctx, target, amount, DamageKind::FIXED, actor);
+    // 自身恢复等量（clamp 到最大体力）
+    ElfPet& healer = ctx->getPet(actor);
+    const int heal_max = std::max(1, healer.numericalProperties[NumericalPropertyIndex::HP]);
+    healer.hp = std::min(heal_max, healer.hp + amount);
+    return DrainHpResult::SUCCESS;
+}
+
+KillResult kill(BattleContext* ctx, int target) {
+    if (!ctx || target < 0 || target > 1) {
+        return KillResult::INVALID_PARAM;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    if (pet.hp <= 0) {
+        return KillResult::ALREADY_DEFEATED;
+    }
+    pet.hp = 0;
+    return KillResult::SUCCESS;
+}

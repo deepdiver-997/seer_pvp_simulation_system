@@ -41,6 +41,53 @@ int resolve_target(int actor, const EffectUnit& unit) {
     return unit.target == 1 ? 1 - actor : actor;
 }
 
+// FIRST/SECOND 行动侧判定（skill 效果经 state_for_owner 镜像到 SECOND 侧，currentState 可靠）。
+inline bool is_first_side_state(State s) {
+    const int v = static_cast<int>(s);
+    return v >= static_cast<int>(State::BATTLE_FIRST_ACTION_START)
+        && v <= static_cast<int>(State::BATTLE_FIRST_MOVER_DEATH);
+}
+inline bool is_second_side_state(State s) {
+    const int v = static_cast<int>(s);
+    return v >= static_cast<int>(State::BATTLE_SECOND_ACTION_START)
+        && v <= static_cast<int>(State::BATTLE_SECOND_MOVER_DEATH);
+}
+
+// 前置条件求值（第二刀）：不满足 → 效果不触发。返回 false 走 on_other。
+bool condition_holds(BattleContext* ctx, const EffectArgs& args, const EffectUnit& unit) {
+    switch (unit.condition) {
+        case UnitCondition::None:
+            return true;
+        case UnitCondition::SameElement: {
+            const int actor = resolve_actor(args, unit);
+            const int target = resolve_target(actor, unit);
+            return ctx->getPet(actor).elementalAttributes[0]
+                == ctx->getPet(target).elementalAttributes[0];
+        }
+        case UnitCondition::FirstMove:
+            return is_first_side_state(ctx->currentState);
+        case UnitCondition::SecondMove:
+            return is_second_side_state(ctx->currentState);
+        case UnitCondition::TargetNoAnomaly:
+        case UnitCondition::TargetHasAnomaly: {
+            const int actor = resolve_actor(args, unit);
+            const int target = resolve_target(actor, unit);
+            for (int end : ctx->abnormal_status_end_round[target]) {
+                if (end != 0) {
+                    return unit.condition == UnitCondition::TargetHasAnomaly;  // 有异常
+                }
+            }
+            return unit.condition == UnitCondition::TargetNoAnomaly;  // 无异常
+        }
+        case UnitCondition::TargetHpBelow: {
+            const int actor = resolve_actor(args, unit);
+            const int target = resolve_target(actor, unit);
+            return ctx->getPet(target).hp < unit.condition_param;
+        }
+    }
+    return true;
+}
+
 // 原语细码 → 分支键归一化（首次消费原语返回值）。
 BranchKey anomaly_result_to_branch(ApplyAnomalyResult result) {
     switch (result) {
@@ -90,6 +137,32 @@ BranchKey fixed_damage_result_to_branch(FixedDamageResult result) {
     }
 }
 
+// 第二刀新原语细码归一化。
+BranchKey pp_reduce_result_to_branch(PpReduceResult result) {
+    return result == PpReduceResult::SUCCESS ? BranchKey::Success : BranchKey::Invalid;
+}
+BranchKey remove_round_effects_result_to_branch(RemoveRoundEffectsResult result) {
+    switch (result) {
+        case RemoveRoundEffectsResult::SUCCESS: return BranchKey::Success;
+        case RemoveRoundEffectsResult::IMMUNE:  return BranchKey::Immune;
+        default:                                 return BranchKey::Blocked;
+    }
+}
+BranchKey drain_hp_result_to_branch(DrainHpResult result) {
+    switch (result) {
+        case DrainHpResult::SUCCESS:          return BranchKey::Success;
+        case DrainHpResult::TARGET_DEFEATED:  return BranchKey::TargetDefeated;
+        default:                              return BranchKey::Invalid;
+    }
+}
+BranchKey kill_result_to_branch(KillResult result) {
+    switch (result) {
+        case KillResult::SUCCESS:              return BranchKey::Success;
+        case KillResult::ALREADY_DEFEATED:     return BranchKey::TargetDefeated;
+        default:                               return BranchKey::Invalid;
+    }
+}
+
 // 执行主动作（owner 相对语义解析），返回归一化分支键。
 BranchKey run_primitive(BattleContext* ctx, const EffectArgs& args, const EffectUnit& unit) {
     const int actor = resolve_actor(args, unit);
@@ -105,6 +178,18 @@ BranchKey run_primitive(BattleContext* ctx, const EffectArgs& args, const Effect
             return heal_result_to_branch(heal(ctx, target, unit.param0));
         case PrimitiveTag::FixedDamage:
             return fixed_damage_result_to_branch(fixed_damage(ctx, target, unit.param0));
+        case PrimitiveTag::PpReduce:
+            return pp_reduce_result_to_branch(pp_reduce(ctx, target, unit.param0));
+        case PrimitiveTag::RemoveRoundEffects:
+            return remove_round_effects_result_to_branch(remove_round_effects(ctx, target));
+        case PrimitiveTag::DrainHp:
+            return drain_hp_result_to_branch(drain_hp(ctx, actor, target, unit.param0));
+        case PrimitiveTag::Kill:
+            return kill_result_to_branch(kill(ctx, target));
+        case PrimitiveTag::PowerBoost:
+            // 技能威力视图层：直接改 ws（效果在 SKILL_EFFECT 时点跑，ATTACK_DAMAGE 读最终值）。
+            ctx->ws.skill_power_view[actor] += unit.param0;
+            return BranchKey::Success;
     }
     return BranchKey::Invalid;
 }
@@ -114,6 +199,10 @@ BranchKey run_primitive(BattleContext* ctx, const EffectArgs& args, const Effect
 BranchKey execute_effect_unit(BattleContext* ctx, const EffectArgs& args, const EffectUnit& unit) {
     if (!ctx) {
         return BranchKey::Invalid;
+    }
+    // 前置条件（第二刀）：不满足 → 效果不触发（走 on_other/无动作），先于概率 roll。
+    if (!condition_holds(ctx, args, unit)) {
+        return unit.on_other ? execute_effect_unit(ctx, args, *unit.on_other) : BranchKey::Never;
     }
     // 概率前置：未触发 → on_other 兜底（或返回 Never）
     if (!roll_chance(args, unit.chance_value, unit.chance_arg)) {

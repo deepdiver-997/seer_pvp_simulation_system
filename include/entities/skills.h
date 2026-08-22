@@ -85,6 +85,30 @@ public:
         }
     }
     Skills(int id, const official_data::MonsterRecord& monster);
+    // 拷贝构造：parsed_units_ 深拷贝成新 vector 后，须把引用它元素的 Effect args.extra
+    // 指针重定基到新 vector（否则组合语法效果的 extra 悬垂 → 执行崩溃）。
+    // 移动构造保持默认（buffer 所有权转移，extra 指针仍有效）。
+    Skills(const Skills& other)
+        : is_locked(other.is_locked)
+        , maxPP(other.maxPP)
+        , pp(other.pp)
+        , id(other.id)
+        , name(other.name)
+        , type(other.type)
+        , power(other.power)
+        , accuracy(other.accuracy)
+        , must_hit(other.must_hit)
+        , critical_strike_rate(other.critical_strike_rate)
+        , penetration_flags(other.penetration_flags)
+        , priority(other.priority)
+        , element{other.element[0], other.element[1]}
+        , rawEffectRecords(other.rawEffectRecords)
+        , effectBranches(other.effectBranches)
+        , selection_effects_(other.selection_effects_)
+        , parsed_units_(other.parsed_units_)
+        , usabilityEffects(other.usabilityEffects) {
+        rebase_parsed_unit_pointers(other.parsed_units_);
+    }
     ~Skills() = default;
     // 计划从官方 SQLite 中加载技能静态层：
     // 1. 通过 official_data::OfficialDataStore / OfficialDataRepository 查 moves
@@ -110,6 +134,35 @@ public:
     std::pair<SkillExecResult, SkillResolutionFlags> execute(BattleContext* ctx, int owner, State trigger_state);
 
 private:
+    // 把 effectBranches/selection_effects_ 里指向 old_units 元素的 extra 指针重定基到
+    // 本对象 parsed_units_（拷贝构造用；旧元素必然整体落在 old_units 缓冲区间内）。
+    void rebase_parsed_unit_pointers(const std::vector<EffectUnit>& old_units) {
+        if (old_units.empty() || parsed_units_.empty()) {
+            return;
+        }
+        const char* old_lo = reinterpret_cast<const char*>(old_units.data());
+        const char* old_hi = old_lo + old_units.size() * sizeof(EffectUnit);
+        const char* new_lo = reinterpret_cast<const char*>(parsed_units_.data());
+        auto rebase_effect = [&](Effect& e) {
+            if (!e.args.extra) {
+                return;
+            }
+            const char* p = static_cast<const char*>(e.args.extra);
+            if (p >= old_lo && p < old_hi) {
+                e.args.extra = new_lo + (p - old_lo);
+            }
+        };
+        for (auto& [result, nodes] : effectBranches) {
+            (void)result;
+            for (SkillEffectNode& node : nodes) {
+                rebase_effect(node.effect);
+            }
+        }
+        for (SkillEffectNode& node : selection_effects_) {
+            rebase_effect(node.effect);
+        }
+    }
+
     // 命中效果失效判定（③层）：nullopt=未失效；kEffectsOnly=保留伤害/kFullNull=白板。
     // 强制执行（force_execute）→ nullopt（绕过③层）。
     std::optional<HitInvalidMode> is_hit_effect_invalid(BattleContext* ctx, int owner) const;

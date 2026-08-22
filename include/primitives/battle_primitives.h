@@ -186,4 +186,55 @@ HealResult heal(BattleContext* ctx, int target, int fraction_denom);
  */
 FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount);
 
+// ----------------------------------------------------------------
+// 第二刀新原语（组合语法：无相谛 5 类条件模板）
+// ----------------------------------------------------------------
+enum class PpReduceResult {
+    SUCCESS,        // 已降低（至少一个技能 PP 变化）
+    INVALID_PARAM,  // 无效参数
+};
+
+/**
+ * pp_reduce - 降低目标方所有技能的 PP。
+ * 无相谛 700"先出手时降低对手所有PP"。target 方每个技能 pp -= amount（clamp ≥0）。
+ */
+PpReduceResult pp_reduce(BattleContext* ctx, int target, int amount);
+
+enum class RemoveRoundEffectsResult {
+    SUCCESS,     // 清除了目标回合类效果
+    NONE,        // 目标没有可清除的回合类效果
+    IMMUNE,      // 目标免断，本次无效
+    INVALID_PARAM,
+};
+
+/**
+ * remove_round_effects - 消除目标回合类效果（复用 break_round_effects，吃免断 + EVENT_BREAK）。
+ * 无相谛 1083"若后出手则消除对手回合类效果"。
+ */
+RemoveRoundEffectsResult remove_round_effects(BattleContext* ctx, int target);
+
+enum class DrainHpResult {
+    SUCCESS,        // 吸取成功（造成固定伤害 + 自身恢复等量）
+    TARGET_DEFEATED,// 目标已死亡
+    INVALID_PARAM,
+};
+
+/**
+ * drain_hp - 吸取体力：目标掉 max_hp/denom 固定伤害，actor 恢复等量（clamp 到 max_hp）。
+ * 无相谛 1257"对手不处于异常状态则吸取对手最大体力的1/{n}"。
+ */
+DrainHpResult drain_hp(BattleContext* ctx, int actor, int target, int fraction_denom);
+
+enum class KillResult {
+    SUCCESS,        // 秒杀（目标体力归 0）
+    ALREADY_DEFEATED,
+    INVALID_PARAM,
+};
+
+/**
+ * kill - 秒杀：目标体力直接归 0。
+ * 无相谛 456"若对手体力不足{n}则直接秒杀"。
+ */
+KillResult kill(BattleContext* ctx, int target);
+
 #endif // BATTLE_PRIMITIVES_H

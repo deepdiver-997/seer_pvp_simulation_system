@@ -96,6 +96,13 @@ struct BattleWorkspace {
     };
     AttackCredential attack_credential[2];   // 按攻击方索引
 
+    //========== 技能威力视图层 ==========
+    // 本回合视角的技能威力：攻击时由 resolve_skill_execution 物化 skill.power，
+    // 效果（如无相谛 179"属性相同威力提升"、未来黯玉咒言随机/累积威力）在
+    // SKILL_EFFECT 时点修改它，ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值。
+    // 0 = 未物化（calculateDamage 回退 skill.power）。
+    int skill_power_view[2];
+
     //========== 命中效果失效标记（③层，白板模式） ==========
     // execute 判定③层 kFullNull 时置位；ATTACK_DAMAGE 阶段据此把伤害归 0（白板）。
     // 每回合 reset 自动清；kEffectsOnly（保留伤害）不置位。
