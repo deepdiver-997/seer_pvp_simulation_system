@@ -3,6 +3,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 #include <db/official_data_repository.h>
@@ -108,11 +109,13 @@ public:
     std::pair<SkillExecResult, SkillResolutionFlags> execute(BattleContext* ctx, int owner, State trigger_state);
 
 private:
-    // 命中效果失效判定（当前空桩，后续接"白板/效果失效保留伤害"两种变体）
-    bool is_hit_effect_invalid(BattleContext* ctx, int owner) const;
-    // 把某结果分支下的效果节点注册到对应时点桶
+    // 命中效果失效判定（③层）：nullopt=未失效；kEffectsOnly=保留伤害/kFullNull=白板。
+    // 强制执行（force_execute）→ nullopt（绕过③层）。
+    std::optional<HitInvalidMode> is_hit_effect_invalid(BattleContext* ctx, int owner) const;
+    // 把某结果分支下的效果节点注册到对应时点桶。
+    // filter_hit_invalid=true 时按效果元数据 nullify.hit_effect_invalidatable 逐节点过滤（③层）。
     void register_branch(BattleContext* ctx, int owner, SkillExecResult result,
-                         const SkillResolutionFlags& flags);
+                         const SkillResolutionFlags& flags, bool filter_hit_invalid = false);
 
 public:
     bool is_locked = false;

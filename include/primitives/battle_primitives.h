@@ -1,6 +1,8 @@
 #ifndef BATTLE_PRIMITIVES_H
 #define BATTLE_PRIMITIVES_H
 
+#include <effects/effect.h>
+
 class BattleContext;
 
 // ================================================================
@@ -123,5 +125,21 @@ void deal_damage(BattleContext* ctx, int target, int amount,
  */
 void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
                 int count, int source_id = -1, bool penetrable = true);
+
+/**
+ * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。
+ *
+ * 目标方后续技能命中时，命中效果按 mode 处理（效果不注册）：
+ *   - kEffectsOnly：保留伤害（效果失效但伤害照常）
+ *   - kFullNull：白板（效果失效 + 伤害归 0）
+ * 强制执行（force_execute）可绕过③层。
+ *
+ * @param target     被失效方 (0/1)
+ * @param mode       失效模式（kEffectsOnly / kFullNull）
+ * @param count      失效次数（>0）
+ * @param source_id  施放方（未知传 -1）
+ */
+void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
+                        int count, int source_id = -1);
 
 #endif // BATTLE_PRIMITIVES_H

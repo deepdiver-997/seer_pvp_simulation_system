@@ -96,6 +96,11 @@ struct BattleWorkspace {
     };
     AttackCredential attack_credential[2];   // 按攻击方索引
 
+    //========== 命中效果失效标记（③层，白板模式） ==========
+    // execute 判定③层 kFullNull 时置位；ATTACK_DAMAGE 阶段据此把伤害归 0（白板）。
+    // 每回合 reset 自动清；kEffectsOnly（保留伤害）不置位。
+    bool hit_invalid_zero_damage[2]{};
+
     //========== 缓存计算值 ==========
     int cached_speed[2];            // 考虑异常后的速度
     int cached_crit_damage[2];      // 暴击伤害倍率(默认200)

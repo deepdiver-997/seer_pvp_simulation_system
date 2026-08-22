@@ -208,6 +208,15 @@ public:
     };
     std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
 
+    //--- 命中效果失效桶（③层：命中但效果不注册；白板=伤害归0/保留伤害=伤害照常）---
+    // 挂在防御方上：其技能命中时命中效果被失效。mode 见 effect.h HitInvalidMode。
+    struct HitEffectInvalid {
+        int source_id = -1;
+        HitInvalidMode mode = HitInvalidMode::kEffectsOnly;
+        int remaining = 0;  // 剩余失效次数
+    };
+    std::vector<HitEffectInvalid> hit_effect_invalids[2];  // [被失效方]
+
     //--- 次数型穿透授予（挂在自己身上，"下1次攻击无视伤害限制"类）---
     // 跨回合持久；成功使用攻击技能后统一消费（每槽 remaining-1，0 移除）。
     // 切换精灵/清场时随 invalidate_on_stage_effects / clearAllEffects 一并清理。
@@ -365,6 +374,7 @@ public:
         ++watcher_valid_id[owner];
         active_round_effects[owner] = 0;  // ON_STAGE 回合效果已全部失效，清计数器
         penetration_grants[owner].clear();  // 次数型穿透授予不继承给新精灵
+        hit_effect_invalids[owner].clear();  // 命中效果失效（③层）不继承给新精灵
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
     }
@@ -376,6 +386,8 @@ public:
         pending_effects.clear();
         penetration_grants[0].clear();
         penetration_grants[1].clear();
+        hit_effect_invalids[0].clear();
+        hit_effect_invalids[1].clear();
         force_execute_on_pp0[0] = false;
         force_execute_on_pp0[1] = false;
         ignore_pp[0] = false;

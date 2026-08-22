@@ -1,4 +1,5 @@
 #include <effects/continuousEffect.h>
+#include <effects/effect_meta.h>
 #include <fsm/battleContext.h>
 #include <entities/elf-pet.h>
 #include <entities/skills.h>
@@ -107,10 +108,17 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
         ctx->consume_penetration_grants_after_attack(owner);
     }
 
-    // 命中效果失效：不注册任何效果（含补偿），但允许后续走伤害管线（由 flags 控制）
-    if (is_hit_effect_invalid(ctx, owner)) {
-        const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::EFFECT_INVALID);
-        return {SkillExecResult::EFFECT_INVALID, flags};
+    // 命中效果失效③层：效果选择性注册（逐节点 nullify 过滤），伤害按模式处理。
+    // ③层绝不注册 SKILL_INVALID 补偿分支；强制执行由 is_hit_effect_invalid 返回 nullopt 绕过。
+    const std::optional<HitInvalidMode> invalid_mode = is_hit_effect_invalid(ctx, owner);
+    if (invalid_mode.has_value()) {
+        if (*invalid_mode == HitInvalidMode::kFullNull) {
+            ctx->ws.hit_invalid_zero_damage[owner] = true;  // 白板：命中效果失效 + 伤害归0
+        }
+        const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::HIT);
+        register_branch(ctx, owner, SkillExecResult::HIT, flags, /*filter_hit_invalid=*/true);
+        ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner, ctx->opponent(owner)});
+        return {SkillExecResult::HIT, flags};
     }
 
     const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::HIT);
@@ -122,23 +130,35 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
     return {SkillExecResult::HIT, flags};
 }
 
-bool Skills::is_hit_effect_invalid(BattleContext* ctx, int owner) const {
-    // 强制执行：无视命中效果失效 → 效果照常注册（官方 2380/2474/魂印2260）。
-    // 凭证已在 query_usage 0) 步物化；此处分支在"命中效果失效两层"落地前是空转
-    // （下方 stub 恒返回 false），届时接上失效判定后强制执行自然生效。
+std::optional<HitInvalidMode> Skills::is_hit_effect_invalid(BattleContext* ctx, int owner) const {
+    // 强制执行：无视命中效果失效 → 无失效（凭证已在 query_usage 0) 步物化）。
     if (ctx && owner >= 0 && owner <= 1 && ctx->ws.attack_credential[owner].force_execute) {
-        return false;
+        return std::nullopt;
     }
-    // TODO:
-    // 这里后续接"命中效果失效"判定：
-    // - 若失效，则技能描述中的 effect 一律不注册（含补偿效果）
-    // - 但攻击伤害链是否继续，由返回的 allowAttackDamagePipeline 决定
-    // - 白板（无伤害无效果）vs 效果失效保留伤害（赵云"胆"）两种变体
-    return false;
+    // ③层触发源：防御方（1-owner）挂了命中效果失效桶 → 消费一次并返回模式。
+    if (ctx && owner >= 0 && owner <= 1) {
+        auto& entries = ctx->hit_effect_invalids[1 - owner];
+        for (auto it = entries.begin(); it != entries.end();) {
+            if (it->remaining <= 0) {
+                it = entries.erase(it);  // 清理过期条目（entries 保序）
+            } else {
+                break;  // 第一条有效即用
+            }
+        }
+        if (!entries.empty()) {
+            const HitInvalidMode mode = entries.front().mode;
+            --entries.front().remaining;
+            if (entries.front().remaining <= 0) {
+                entries.erase(entries.begin());
+            }
+            return mode;
+        }
+    }
+    return std::nullopt;
 }
 
 void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult result,
-                             const SkillResolutionFlags& flags) {
+                             const SkillResolutionFlags& flags, bool filter_hit_invalid) {
     if (!flags.registerSkillEffects) {
         return;
     }
@@ -150,6 +170,13 @@ void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult resu
         Effect effect = node.effect;
         bind_participants(effect, owner);
         if (!effect.logic) continue;
+        // ③层：命中效果失效时跳过可否决节点（逐效果 nullify 标签，非整技能一刀切）
+        if (filter_hit_invalid) {
+            const EffectMeta* meta = EffectMetaCatalog::instance().find(effect.id);
+            if (meta && meta->nullify.hit_effect_invalidatable) {
+                continue;
+            }
+        }
 
         const State register_state = state_for_owner(node.registerState, owner, ctx);
         const State pending_observe_state = state_for_owner(node.pendingObserveState, owner, ctx);

@@ -33,6 +33,19 @@ constexpr MetaOverride kMetaOverrides[] = {
     {699, EffectCategory::Penetration, -1, -1, "override: 无视攻击免疫（穿透）"},
 };
 
+// 可否决性覆盖表：③层命中效果失效时是否跳过该效果。
+// 默认 NullifyPolicy.hit_effect_invalidatable=true；此处列出的效果例外（固有效果不可否决，文档第六节）。
+struct NullifyOverride {
+    int effect_id;
+    bool hit_effect_invalidatable;  // false = ③层失效时仍注册（固有效果）
+    const char* note;
+};
+
+constexpr NullifyOverride kNullifyOverrides[] = {
+    // 1002 条件先制（"若对手处于异常状态则先制+1"）：固有效果，③层仍生效
+    {1002, false, "override: 条件先制不可否决"},
+};
+
 bool contains_substring(const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
 }
@@ -173,6 +186,12 @@ bool EffectMetaCatalog::build() {
             meta.chance.arg_index = override_entry.chance_arg;
         }
         meta.source_note = override_entry.note;
+    }
+
+    // 可否决性覆盖（③层命中效果失效时逐效果标签）
+    for (const NullifyOverride& override_entry : kNullifyOverrides) {
+        metas_[override_entry.effect_id].nullify.hit_effect_invalidatable =
+            override_entry.hit_effect_invalidatable;
     }
 
     built_ = !metas_.empty();

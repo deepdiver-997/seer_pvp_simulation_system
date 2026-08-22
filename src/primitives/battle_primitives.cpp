@@ -210,3 +210,12 @@ void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
         source_id, count, attribute, attack, penetrable, /*armor_level=*/0,
     });
 }
+
+void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
+                        int count, int source_id) {
+    if (!ctx || target < 0 || target > 1 || count <= 0) {
+        return;
+    }
+    ctx->hit_effect_invalids[target].push_back(
+        BattleContext::HitEffectInvalid{source_id, mode, count});
+}
