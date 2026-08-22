@@ -1,0 +1,24 @@
+.vscode/
+.github/skills/
+.claude/
+build/
+test/
+# 场景化对战测试（每场景一个二进制）纳入版本控制；test.cpp 冒烟单测仍忽略
+!test/
+!test/scenario/
+!test/scenario/scenario_harness.h
+!test/scenario/scenario_a.cpp
+!test/scenario/scenario_b.cpp
+!test/scenario/scenario_c.cpp
+test/test.cpp
+.gitignore
+.DS_Store
+.git/
+!README.md
+scripts/
+node_modules/
+.venv/
+# 游戏知识/参考资料（时点图、机制笔记、专栏数据、提示词），不追踪
+reference/
+*.dylib
+*.json*

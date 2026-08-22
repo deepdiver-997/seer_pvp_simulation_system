@@ -76,6 +76,7 @@ SkillExecResult default_branch_for_effect(int effect_id) {
     switch (effect_id) {
         case 2006:
         case 2501:
+        case 2126:  // 烬灭神咒剑：技能无效时消除对手回合类/能力提升 + 焚烬
             return SkillExecResult::SKILL_INVALID;
         default:
             return SkillExecResult::HIT;
@@ -200,6 +201,17 @@ bool Skills::loadSkills() {
             penetration_flags.ignore_attack_immunity |= pf.ignore_attack_immunity;
             penetration_flags.ignore_damage_limit |= pf.ignore_damage_limit;
             penetration_flags.level = std::max(penetration_flags.level, pf.level);
+            continue;
+        }
+        // 条件先制（2000：若对手处于能力提升状态则先制+1且必定命中）等选择期效果
+        // → selection_effects_（on_selected 统一注册到 MOVE_RIGHT 桶，先手权比较前生效）。
+        // 与基值先制同族；一般化的"选择期效果路由"留数据驱动后续。
+        if (effect_record.effect_id == 2000) {
+            Effect sel = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));
+            if (sel.logic) {
+                selection_effects_.push_back(
+                    SkillEffectNode(std::move(sel), State::BATTLE_FIRST_MOVE_RIGHT));
+            }
             continue;
         }
         Effect effect = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));

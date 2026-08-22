@@ -68,6 +68,19 @@ if(BUILD_SMOKE_TEST)
     add_executable(sim_smoke_test test/test.cpp)
     target_include_directories(sim_smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(sim_smoke_test PRIVATE sim_core)
+
+    # 场景化对战测试（每场景一个二进制；共用 test/scenario/scenario_harness.h）
+    add_executable(sim_scenario_a test/scenario/scenario_a.cpp)
+    target_include_directories(sim_scenario_a PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(sim_scenario_a PRIVATE sim_core)
+
+    add_executable(sim_scenario_b test/scenario/scenario_b.cpp)
+    target_include_directories(sim_scenario_b PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(sim_scenario_b PRIVATE sim_core)
+
+    add_executable(sim_scenario_c test/scenario/scenario_c.cpp)
+    target_include_directories(sim_scenario_c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(sim_scenario_c PRIVATE sim_core)
 endif()
 
 if(BUILD_TRAINING_CLI)
