@@ -199,7 +199,7 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 }
 
 void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
-                int count, int source_id) {
+                int count, int source_id, bool penetrable) {
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
@@ -207,6 +207,6 @@ void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
         return;
     }
     ctx->skill_seals[target].push_back(BattleContext::SkillSeal{
-        source_id, count, attribute, attack,
+        source_id, count, attribute, attack, penetrable, /*armor_level=*/0,
     });
 }

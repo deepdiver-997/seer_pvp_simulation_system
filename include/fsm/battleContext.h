@@ -203,8 +203,23 @@ public:
         int remaining = 0;    // 剩余拦截次数
         bool seal_attribute = false;  // 封锁属性技能（category=4）
         bool seal_attack = false;     // 封锁攻击技能（category=1/2）
+        bool penetrable = true;   // 可否被"无视攻击免疫"穿透：false=条件盔/龙威，恒被挡
+        int  armor_level = 0;     // 盔等级：0=可穿盔, 1=条件盔, 2=龙威（本轮只存不比较）
     };
     std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
+
+    //--- 次数型穿透授予（挂在自己身上，"下1次攻击无视伤害限制"类）---
+    // 跨回合持久；成功使用攻击技能后统一消费（每槽 remaining-1，0 移除）。
+    // 切换精灵/清场时随 invalidate_on_stage_effects / clearAllEffects 一并清理。
+    struct PenetrationGrant {
+        int owner = -1;
+        int remaining = 0;         // 剩余次数
+        int level = 1;             // 穿透等级（最小门只用 1）
+        bool ignore_attack_immunity = false;  // 699 语义
+        bool ignore_damage_limit = false;     // 697 语义
+        int source_id = -1;        // 来源（技能/魂印 id）
+    };
+    std::vector<PenetrationGrant> penetration_grants[2];  // [授予方]
 
     //--- 技能效果执行表 ---
     // 内层用 std::map<uint64_t, ...>：key = (source_id << 32) | effect_id，
@@ -303,6 +318,38 @@ public:
     //--- 回合结束 ---
     void advanceRound() { ++roundCount; }
 
+    //--- 次数型穿透授予 API ---
+    // 授予"下N次攻击无视免疫/伤害限制"（如魂印/技能给的一次性穿透）。跨回合持久，
+    // 成功使用攻击技能后由 consume_penetration_grants_after_attack 统一消费。
+    // 内联实现：插件动态库不链接 sim_core，需头文件可见（仿 843 先例）。
+    int grant_penetration(int owner, int level, bool ignore_attack_immunity,
+                          bool ignore_damage_limit, int count, int source_id = -1) {
+        if (owner < 0 || owner > 1 || count <= 0) {
+            return -1;
+        }
+        penetration_grants[owner].push_back(
+            PenetrationGrant{owner, count, level, ignore_attack_immunity,
+                             ignore_damage_limit, source_id});
+        return static_cast<int>(penetration_grants[owner].size()) - 1;
+    }
+
+    // 成功使用攻击技能后统一消费：每槽 remaining-1，0 移除。
+    // 即使对手无阻挡也消费（"下一次攻击"语义），miss/sealed 不消费（调用方保证）。
+    void consume_penetration_grants_after_attack(int owner) {
+        if (owner < 0 || owner > 1) {
+            return;
+        }
+        auto& grants = penetration_grants[owner];
+        for (auto it = grants.begin(); it != grants.end();) {
+            --it->remaining;
+            if (it->remaining <= 0) {
+                it = grants.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     //--- 切换/清场 ---
     // 使某方所有 ON_STAGE 效果惰性失效（切换精灵/清场用）。
     // 通过递增版本号实现：旧 ON_STAGE 效果 valid_id_ 不匹配 → 执行时跳过 + cleanup 移除。
@@ -313,6 +360,7 @@ public:
         ++round_effect_valid_id[owner];
         ++watcher_valid_id[owner];
         active_round_effects[owner] = 0;  // ON_STAGE 回合效果已全部失效，清计数器
+        penetration_grants[owner].clear();  // 次数型穿透授予不继承给新精灵
     }
 
     //--- 清空效果 ---
@@ -320,6 +368,8 @@ public:
         skills_effects.clear();
         soul_mark_effects.clear();
         pending_effects.clear();
+        penetration_grants[0].clear();
+        penetration_grants[1].clear();
         active_round_effects[0] = 0;
         active_round_effects[1] = 0;
         event_center_.clear_all();

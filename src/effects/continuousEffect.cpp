@@ -100,6 +100,13 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
         return {SkillExecResult::SKILL_INVALID, flags};
     }
 
+    // 成功使用攻击技能 → 统一消费次数型穿透授予（"下一次攻击"语义：即使对手无阻挡也消费）。
+    // miss/sealed 已在上方提前 return 不消费；属性技能无攻击语义不消费。
+    // EFFECT_INVALID（命中效果失效）也算成功使用 → 也消费。
+    if (type != SkillType::Attribute) {
+        ctx->consume_penetration_grants_after_attack(owner);
+    }
+
     // 命中效果失效：不注册任何效果（含补偿），但允许后续走伤害管线（由 flags 控制）
     if (is_hit_effect_invalid(ctx, owner)) {
         const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::EFFECT_INVALID);

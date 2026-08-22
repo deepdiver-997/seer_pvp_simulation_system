@@ -28,6 +28,9 @@ constexpr MetaOverride kMetaOverrides[] = {
     {843, EffectCategory::Priority, -1, -1, "override: 基值先制"},
     // 2533 异常附加（"{0}%令对手{1}，未触发则恢复PP"）——规则可命中，作回归锚点
     {2533, EffectCategory::StatusInflict, -1, 0, "override: 概率异常附加"},
+    // 697/699 穿透凭证（"无视伤害限制效果"/"无视攻击免疫效果"）——规则可命中，显式列出作文档
+    {697, EffectCategory::Penetration, -1, -1, "override: 无视伤害限制（穿透）"},
+    {699, EffectCategory::Penetration, -1, -1, "override: 无视攻击免疫（穿透）"},
 };
 
 bool contains_substring(const std::string& text, const char* needle) {
@@ -90,6 +93,12 @@ int match_status_inflict_pattern(const std::string& info) {
 
 // 关键词分类（在 StatusInflict 主规则之后调用）。
 EffectCategory classify_by_keywords(const std::string& info) {
+    // 穿透凭证（697"无视伤害限制效果"/699"无视攻击免疫效果"）。
+    // 放在最前避免被后续 DamageModify/Other 吞掉；泛化兜底"无视…免疫"。
+    if (contains_substring(info, "无视伤害限制") || contains_substring(info, "无视攻击免疫")
+        || (contains_substring(info, "无视") && contains_substring(info, "免疫"))) {
+        return EffectCategory::Penetration;
+    }
     if (contains_substring(info, "先制")) {
         return EffectCategory::Priority;
     }

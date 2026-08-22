@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <effects/effect_meta.h>
 #include <fsm/battleContext.h>
 
 namespace {
@@ -80,6 +81,49 @@ SkillExecResult default_branch_for_effect(int effect_id) {
     }
 }
 
+// 穿透类效果的凭证位（697"无视伤害限制"/699"无视攻击免疫"）。
+// 与 effect_meta 的 Penetration 分类双保险：meta 负责"这是不是穿透类"，
+// 此表负责"穿什么"；未列出的穿透效果返回全零（降级为无凭证）。
+Skills::PenetrationFlags penetration_flags_for_effect(int effect_id) {
+    Skills::PenetrationFlags flags;
+    switch (effect_id) {
+        case 697:  // 无视伤害限制效果
+            flags.ignore_damage_limit = true;
+            flags.level = 1;
+            break;
+        case 699:  // 无视攻击免疫效果
+            flags.ignore_attack_immunity = true;
+            flags.level = 1;
+            break;
+        default:
+            break;
+    }
+    return flags;
+}
+
+// 把"技能自带穿透（697/699）+ 活跃次数授予"合并进 ws.attack_credential[owner]。
+// 攻击时现算（每次攻击重新合并）而非每回合物化——额外行动/多攻击不会复用已消费凭证，
+// 回合中段新获得的授予也能即时读到。凭证在 ws 里每回合 reset 自动清，无需手动销毁。
+void materialize_attack_credential(BattleContext* ctx, int owner, const Skills& skill) {
+    if (!ctx || owner < 0 || owner > 1) {
+        return;
+    }
+    BattleWorkspace::AttackCredential& cred = ctx->ws.attack_credential[owner];
+    cred = BattleWorkspace::AttackCredential{};  // 用默认成员清零
+    cred.ignore_attack_immunity |= skill.penetration_flags.ignore_attack_immunity;
+    cred.ignore_damage_limit |= skill.penetration_flags.ignore_damage_limit;
+    cred.level = std::max(cred.level, skill.penetration_flags.level);
+    for (const auto& grant : ctx->penetration_grants[owner]) {
+        if (grant.remaining <= 0) {
+            continue;
+        }
+        cred.ignore_attack_immunity |= grant.ignore_attack_immunity;
+        cred.ignore_damage_limit |= grant.ignore_damage_limit;
+        cred.level = std::max(cred.level, grant.level);
+    }
+    cred.valid = cred.ignore_attack_immunity || cred.ignore_damage_limit;
+}
+
 } // namespace
 
 Skills::Skills(int id, const official_data::MonsterRecord& monster)
@@ -127,6 +171,17 @@ bool Skills::loadSkills() {
     selection_effects_.clear();
 
     for (const auto& effect_record : rawEffectRecords) {
+        // 穿透类效果（697"无视伤害限制"/699"无视攻击免疫"）→ 并入本技能穿透凭证，
+        // 不注册普通分支。理由：穿透在 query_usage 门判定（效果注册之前）就消费，
+        // 697/699 是 args_num=0 的纯标记模板，注册成 HIT 分支既无函数可执行也时机太晚。
+        const EffectMeta* meta = EffectMetaCatalog::instance().find(effect_record.effect_id);
+        if (meta && meta->category == EffectCategory::Penetration) {
+            const PenetrationFlags pf = penetration_flags_for_effect(effect_record.effect_id);
+            penetration_flags.ignore_attack_immunity |= pf.ignore_attack_immunity;
+            penetration_flags.ignore_damage_limit |= pf.ignore_damage_limit;
+            penetration_flags.level = std::max(penetration_flags.level, pf.level);
+            continue;
+        }
         Effect effect = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));
         if (!effect.logic) {
             continue;
@@ -256,13 +311,19 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         }
     }
 
-    // ② 次数类拦截（封属性/封攻击）：匹配则消费次数
+    // ② 门判定（次数类拦截：封属性/封攻击）：先物化本次攻击穿透凭证，再做穿透感知消费。
+    // 穿透只绕"封攻击"的可穿盔（seal_attack && penetrable）：封属性不被 699 穿透；
+    // 条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。miss 已在 ① 提前 return。
+    materialize_attack_credential(ctx, owner, *this);
     auto& seals = ctx->skill_seals[owner];
     for (auto it = seals.begin(); it != seals.end(); ++it) {
         const bool is_attribute = (type == SkillType::Attribute);
         const bool matches = is_attribute ? it->seal_attribute : it->seal_attack;
         if (!matches) {
             continue;
+        }
+        if (it->penetrable && ctx->ws.attack_credential[owner].ignore_attack_immunity) {
+            continue;  // 可穿盔被穿透 → 保留次数（文档 5.2），继续看下一条
         }
         --it->remaining;
         if (it->remaining <= 0) {

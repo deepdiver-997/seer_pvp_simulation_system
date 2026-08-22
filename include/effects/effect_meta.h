@@ -30,6 +30,7 @@ enum class EffectCategory {
     Priority,      // 先制修改
     Shield,        // 护盾/护罩
     Drain,         // 吸取
+    Penetration,   // 穿透凭证（697"无视伤害限制"/699"无视攻击免疫"，请求携带而非可执行效果）
     Other,         // 已分析但不属于上述类别
 };
 

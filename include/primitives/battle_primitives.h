@@ -119,8 +119,9 @@ void deal_damage(BattleContext* ctx, int target, int amount,
  * @param attack     是否封攻击技能
  * @param count      拦截次数（>0）
  * @param source_id  施放方（未知传 -1）
+ * @param penetrable 可否被"无视攻击免疫"穿透（默认 true=可穿盔；false=条件盔/龙威）
  */
 void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
-                int count, int source_id = -1);
+                int count, int source_id = -1, bool penetrable = true);
 
 #endif // BATTLE_PRIMITIVES_H
