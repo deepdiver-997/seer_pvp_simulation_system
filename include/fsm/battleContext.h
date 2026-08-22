@@ -122,6 +122,7 @@ public:
     //--- 魂印条件凭证信号（SET 端：魂印激活时设置，切换/清场清零）---
     bool force_execute_on_pp0[2]{};  // 魂印激活：使用 PP=0 技能时必定命中+强制执行（无为觉者 2260）
     bool ignore_pp[2]{};             // 魂印激活：PP=0 技能仍可选（不受PP限制）
+    bool pp_reverse[2]{};            // 魂印激活：使用技能后 PP 反转（当前PP与已损失互换，无为觉者 2260）
 
     //--- 技能效果执行表 ---
     // 内层用 std::map<uint64_t, ...>：key = (source_id << 32) | effect_id，
@@ -266,6 +267,7 @@ public:
         hit_effect_invalids[owner].clear();  // 命中效果失效（③层）不继承给新精灵
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
+        pp_reverse[owner] = false;
     }
 
     //--- 清空效果 ---
@@ -281,6 +283,8 @@ public:
         force_execute_on_pp0[1] = false;
         ignore_pp[0] = false;
         ignore_pp[1] = false;
+        pp_reverse[0] = false;
+        pp_reverse[1] = false;
         active_round_effects[0] = 0;
         active_round_effects[1] = 0;
         event_center_.clear_all();

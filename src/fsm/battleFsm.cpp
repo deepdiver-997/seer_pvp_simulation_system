@@ -137,6 +137,17 @@ int consume_selected_skill_pp(BattleContext* ctx, int robot_id) {
         return 0;
     }
 
+    // PP 反转（魂印信号，如无为觉者 2260）：使用后 PP = maxPP - 原PP
+    // （当前 PP 与已损失 PP 互换）。PP=0 使用时反转回满 maxPP。
+    if (ctx->pp_reverse[robot_id]) {
+        const int original = skill.pp;
+        skill.pp = skill.maxPP - original;
+        if (skill.pp < 0) {
+            skill.pp = 0;
+        }
+        return skill.pp - original;  // 本次"变化量"（日志用）
+    }
+
     const int pp_cost = std::max(0, ctx->ws.skill_pp_cost_multiplier[robot_id]);
     if (pp_cost <= 0 || skill.pp <= 0) {
         return 0;
