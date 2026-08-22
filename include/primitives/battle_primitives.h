@@ -142,4 +142,23 @@ void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
 void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
                         int count, int source_id = -1);
 
+// ----------------------------------------------------------------
+// 能力等级变化
+// ----------------------------------------------------------------
+enum class StatChangeResult {
+    SUCCESS,       // 成功变更
+    AT_CAP,        // 到上限/下限（等级越界，未变更）
+    INVALID_PARAM, // 无效参数（target/stat 非法）
+};
+
+/**
+ * stat_change - 真实能力等级变更（pet.levels，持久；视层留 ws）。
+ * 返回"发生了什么"，效果程序据此分支（如"提升失败则附加固定伤害"）。
+ *
+ * @param target 目标方 (0/1)
+ * @param stat   能力下标（0=攻击 1=特攻 2=防御 3=特防 4=速度 5=体力）
+ * @param delta  变化量（正=提升，负=下降；越界则 AT_CAP 不变更）
+ */
+StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta);
+
 #endif // BATTLE_PRIMITIVES_H

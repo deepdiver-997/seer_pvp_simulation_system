@@ -219,3 +219,17 @@ void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
     ctx->hit_effect_invalids[target].push_back(
         BattleContext::HitEffectInvalid{source_id, mode, count});
 }
+
+StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta) {
+    if (!ctx || target < 0 || target > 1 || stat < 0 || stat >= 6) {
+        return StatChangeResult::INVALID_PARAM;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    int& level = pet.levels[stat];
+    const int new_level = level + delta;
+    if (new_level > 6 || new_level < -6) {
+        return StatChangeResult::AT_CAP;  // 到上限/下限，不变更
+    }
+    level = new_level;
+    return StatChangeResult::SUCCESS;
+}

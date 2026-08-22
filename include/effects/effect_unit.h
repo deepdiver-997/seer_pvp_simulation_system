@@ -1,0 +1,53 @@
+#ifndef EFFECT_UNIT_H
+#define EFFECT_UNIT_H
+
+#include <effects/effect.h>
+#include <primitives/battle_primitives.h>
+
+// 条件效果单元（效果组合语法第一刀）。
+//
+// 效果 = 主动作（原语调用）→ 归一化返回值 → if-else 分支。
+// 执行器同步调用原语拿细码（apply_anomaly 的 TARGET_IMMUNE 等），归一化为 BranchKey，
+// 走对应分支——分支是执行器局部变量，不需要全局结果槽。
+// 复杂效果 = 单元递归组合；Type B 补偿（被免疫/被阻 → 补偿）就是 on_immune/on_blocked 分支。
+//
+// 数据驱动方向：EffectUnit 后续从 effect_info 模板 + effect_meta 生成
+// （"{n}%令对手{...}" → Anomaly 主动作 + 概率；"未触发则" → 兜底分支），本轮先手工构造。
+
+enum class PrimitiveTag {
+    Anomaly,      // apply_anomaly：param0=anomaly_id, param1=duration_rounds
+    StatChange,   // stat_change：param0=stat, param1=delta
+};
+
+// 原语返回值归一化的分支键。
+enum class BranchKey {
+    Success,       // 成功（SUCCESS/REPLACED/DURATION_EXTENDED）
+    Immune,        // 被免疫/天生机制挡住（Type B 补偿落点）
+    Blocked,       // 被其他效果阻止
+    TargetDefeated,
+    AtCap,         // 到上限/下限（能力等级）
+    Invalid,       // 参数无效
+    Never,         // 概率未触发（chance roll 失败）
+};
+
+struct EffectUnit {
+    PrimitiveTag primary_tag = PrimitiveTag::Anomaly;
+    int actor = 0;   // 主动作发起方（0/1）
+    int target = 1;  // 主动作目标（0/1）
+    int param0 = 0;  // 原语参数0（anomaly_id / stat）
+    int param1 = 0;  // 原语参数1（duration / delta）
+    int chance_arg = -1;  // 概率参数下标（EffectArgs.int_args 下标；-1=必定执行）
+
+    // 分支动作（递归子单元；nullptr=无动作）。chance 未触发走 on_other。
+    const EffectUnit* on_success = nullptr;
+    const EffectUnit* on_immune = nullptr;   // Type B：被免疫 → 补偿
+    const EffectUnit* on_blocked = nullptr;
+    const EffectUnit* on_other = nullptr;    // 其余失败键（含概率未触发）
+};
+
+// 执行器（sim_core 内驻；原语在 sim_core，插件调不到）。
+// 概率 roll → 调原语 → 归一化细码为 BranchKey → 递归执行分支。
+// 返回最终归一化 BranchKey（测试/上层观测用）。
+BranchKey execute_effect_unit(BattleContext* ctx, const EffectArgs& args, const EffectUnit& unit);
+
+#endif // EFFECT_UNIT_H
