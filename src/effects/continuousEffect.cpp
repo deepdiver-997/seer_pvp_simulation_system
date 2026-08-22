@@ -123,8 +123,12 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
 }
 
 bool Skills::is_hit_effect_invalid(BattleContext* ctx, int owner) const {
-    (void)ctx;
-    (void)owner;
+    // 强制执行：无视命中效果失效 → 效果照常注册（官方 2380/2474/魂印2260）。
+    // 凭证已在 query_usage 0) 步物化；此处分支在"命中效果失效两层"落地前是空转
+    // （下方 stub 恒返回 false），届时接上失效判定后强制执行自然生效。
+    if (ctx && owner >= 0 && owner <= 1 && ctx->ws.attack_credential[owner].force_execute) {
+        return false;
+    }
     // TODO:
     // 这里后续接"命中效果失效"判定：
     // - 若失效，则技能描述中的 effect 一律不注册（含补偿效果）

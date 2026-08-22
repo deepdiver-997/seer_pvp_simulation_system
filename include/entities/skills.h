@@ -127,12 +127,13 @@ public:
     int accuracy;
     bool must_hit = false;   // 必中：命中结算无视命中率
     float critical_strike_rate;
-    // 穿透凭证（由 697"无视伤害限制"/699"无视攻击免疫"等效果模板经 effect_meta 识别后合并）。
+    // 技能请求凭证（697"无视伤害限制"/699"无视攻击免疫"/强制执行等效果模板经 effect_meta 识别后合并）。
     // 攻击时由 materialize_attack_credential 并入 ws.attack_credential，作为"请求携带的凭证"，
-    // 在 query_usage 门判定（先于效果注册）消费。
+    // 在 query_usage 门判定（先于效果注册）消费。force_execute 非穿透但同族（凭证位）。
     struct PenetrationFlags {
         bool ignore_attack_immunity = false;  // 穿"攻击免疫/狮盔"（699）
         bool ignore_damage_limit = false;     // 穿"伤害限制"（697）
+        bool force_execute = false;           // 强制执行：必定命中 + 无视命中效果失效（2474 等）
         int  level = 0;                       // 0=无, 1=可穿盔
     };
     PenetrationFlags penetration_flags;

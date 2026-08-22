@@ -88,9 +88,10 @@ struct BattleWorkspace {
     // "下N次攻击无视免疫/伤害限制"的物化槽：攻击时由 materialize_attack_credential
     // 现算合并（技能自带 697/699 + 次数授予），query_usage 门判定读它；回合结束 reset 清除。
     struct AttackCredential {
-        bool valid = false;                  // 本次攻击是否携带穿透凭证
+        bool valid = false;                  // 本次攻击是否携带凭证（穿透或强制）
         bool ignore_attack_immunity = false; // 穿"攻击免疫/狮盔"（官方 699）
         bool ignore_damage_limit = false;    // 穿"伤害限制"（官方 697，本轮只存不消费）
+        bool force_execute = false;          // 强制执行：必定命中 + 无视命中效果失效（官方 2380/2474/魂印2260）
         int  level = 0;                      // 穿透等级：0=无, 1=可穿盔（等级比较留 SkillInvalidCenter）
     };
     AttackCredential attack_credential[2];   // 按攻击方索引

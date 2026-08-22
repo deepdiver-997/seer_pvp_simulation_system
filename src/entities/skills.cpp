@@ -112,6 +112,7 @@ void materialize_attack_credential(BattleContext* ctx, int owner, const Skills& 
     cred = BattleWorkspace::AttackCredential{};  // 用默认成员清零
     cred.ignore_attack_immunity |= skill.penetration_flags.ignore_attack_immunity;
     cred.ignore_damage_limit |= skill.penetration_flags.ignore_damage_limit;
+    cred.force_execute |= skill.penetration_flags.force_execute;
     cred.level = std::max(cred.level, skill.penetration_flags.level);
     for (const auto& grant : ctx->penetration_grants[owner]) {
         if (grant.remaining <= 0) {
@@ -121,7 +122,7 @@ void materialize_attack_credential(BattleContext* ctx, int owner, const Skills& 
         cred.ignore_damage_limit |= grant.ignore_damage_limit;
         cred.level = std::max(cred.level, grant.level);
     }
-    cred.valid = cred.ignore_attack_immunity || cred.ignore_damage_limit;
+    cred.valid = cred.ignore_attack_immunity || cred.ignore_damage_limit || cred.force_execute;
 }
 
 } // namespace
@@ -301,8 +302,11 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         return SkillUsageResult::MISS;
     }
 
-    // ① 命中判定（优先级最高）
-    if (!must_hit) {
+    // 0) 物化本次请求凭证（穿透 697/699 + 次数授予 + 强制执行），供 ①miss 与 ②门判定读。
+    materialize_attack_credential(ctx, owner, *this);
+
+    // ① 命中判定（优先级最高）：强制执行隐含必定命中 → 跳过 miss 计算。
+    if (!must_hit && !ctx->ws.attack_credential[owner].force_execute) {
         const int accuracy = this->accuracy;
         const float dodge_chance = ctx->ws.dodge_rate[1 - owner];
         const int hit_chance = accuracy - static_cast<int>(dodge_chance * 100);
@@ -311,10 +315,9 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         }
     }
 
-    // ② 门判定（次数类拦截：封属性/封攻击）：先物化本次攻击穿透凭证，再做穿透感知消费。
+    // ② 门判定（次数类拦截：封属性/封攻击）：穿透感知消费。
     // 穿透只绕"封攻击"的可穿盔（seal_attack && penetrable）：封属性不被 699 穿透；
     // 条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。miss 已在 ① 提前 return。
-    materialize_attack_credential(ctx, owner, *this);
     auto& seals = ctx->skill_seals[owner];
     for (auto it = seals.begin(); it != seals.end(); ++it) {
         const bool is_attribute = (type == SkillType::Attribute);
