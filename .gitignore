@@ -10,6 +10,8 @@ test/
 !test/scenario/scenario_a.cpp
 !test/scenario/scenario_b.cpp
 !test/scenario/scenario_c.cpp
+!test/scenario/scenario_d.cpp
+!test/scenario/scenario_e.cpp
 test/test.cpp
 .gitignore
 .DS_Store
