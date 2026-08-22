@@ -31,6 +31,10 @@ public:
     // 激活魂印效果：把 effect 包成 ContinuousEffect 注册进魂印桶（BATTLE_ROUND_START 每回合执行）。
     // owner = 持有方 (0/1)。此前魂印效果链从未激活（只声明未实现），这是所有魂印生效的前提。
     void register_soul_effect(BattleContext* context, int owner);
+    // 魂印激活：立即执行一次 effect（设置持久信号，如 2260 的 ignore_pp/force_execute_on_pp0）。
+    // 战斗开始（OPERATION_ENTER_EXIT_STAGE，早于首轮技能选择）调用，使信号在选择前就绪；
+    // 与 register_soul_effect（ROUND_START 每回合重断言）配合。
+    void activate_soul_mark(BattleContext* context, int owner);
     void unregister_soul_effect(BattleContext* context);
 };
 

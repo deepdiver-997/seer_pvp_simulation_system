@@ -249,6 +249,23 @@ size_t SoulMarkManager::getLoadedLibraryCount() const {
 // source_id=魂印 id 同源去重），注册进魂印桶。每回合重注册（FSM handle_BattleRoundStart 调），
 // 幂等信号类魂印（如 2260 设 force_execute_on_pp0/ignore_pp）天然正确；
 // 一次性/条件激活语义留"激活谓词"任务。
+void SoulMark::activate_soul_mark(BattleContext* context, int owner) {
+    if (!context || owner < 0 || owner > 1 || !effect) {
+        return;
+    }
+    // 绑定参与者：args[0]=owner, args[1]=1-owner（魂印函数用 resolve_owner_from_args 读）。
+    std::vector<int> merged;
+    merged.push_back(owner);
+    merged.push_back(1 - owner);
+    if (args.owned_int_args.size() >= 2) {
+        for (std::size_t i = 2; i < args.owned_int_args.size(); ++i) {
+            merged.push_back(args.owned_int_args[i]);
+        }
+    }
+    EffectArgs bind_args(std::move(merged));
+    effect(context, bind_args);
+}
+
 void SoulMark::register_soul_effect(BattleContext* context, int owner) {
     if (!context || owner < 0 || owner > 1 || !effect) {
         return;

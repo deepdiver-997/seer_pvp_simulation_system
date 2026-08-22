@@ -582,6 +582,14 @@ void BattleFsm::handle_GameStart(BattleContext* battleContext) {
 
 void BattleFsm::handle_OperationEnterExitStage(BattleContext* battleContext) {
     log("Operation: Enter/Exit Stage.");
+    // 魂印激活（战斗开始，早于首轮技能选择）：
+    // 立即执行一次魂印 effect 设置持久信号（如 2260 的 ignore_pp/force_execute_on_pp0），
+    // 使 PP=0 等条件在选择期（OPERATION_CHOOSE_SKILL_MEDICAMENT）就绪。
+    // ROUND_START 的 register_soul_effect 仍每回合重断言。
+    for (int i = 0; i < 2; ++i) {
+        ElfPet& pet = battleContext->seerRobot[i].elfPets[battleContext->on_stage[i]];
+        pet.soulMark.activate_soul_mark(battleContext, i);
+    }
     battleContext->execute_registered_actions(-1, State::OPERATION_ENTER_EXIT_STAGE);
     battleContext->generateState();
 }
