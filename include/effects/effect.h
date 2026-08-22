@@ -172,6 +172,8 @@ public:
 
     // IEffectRegistry interface - for plugin use
     void registerSoulMark(int soulmark_id, EffectFn effect_fn) override;
+    void registerSoulMarkProgram(int soulmark_id,
+                                 const std::vector<SoulMarkNodeRef>& nodes) override;
     void registerSkillEffect(int effect_id, EffectFn effect_fn) override;
     void registerSoulMarks(
         const std::vector<std::pair<int, EffectFn>>& soulmarks) override;

@@ -219,6 +219,21 @@ void SoulMarkManager::registerSoulMark(int soulmark_id, EffectFn effect_fn) {
     registerEffect(soulmark_id, effect_fn);
 }
 
+void SoulMarkManager::registerSoulMarkProgram(int soulmark_id,
+                                              const std::vector<SoulMarkNodeRef>& nodes) {
+    std::unique_lock<std::shared_mutex> write_lock(cache_mutex_);
+    program_cache_[soulmark_id] = nodes;
+}
+
+const std::vector<SoulMarkNodeRef>* SoulMarkManager::getSoulMarkProgram(int soulmarkId) const {
+    std::shared_lock<std::shared_mutex> read_lock(cache_mutex_);
+    auto it = program_cache_.find(soulmarkId);
+    if (it == program_cache_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
 void SoulMarkManager::registerSkillEffect(int effect_id, EffectFn effect_fn) {
     // SoulMarkManager only handles soul marks, not skill effects
     // This is a no-op for soul mark manager
@@ -244,16 +259,10 @@ size_t SoulMarkManager::getLoadedLibraryCount() const {
     return loaded_libraries_.size();
 }
 
-// SoulMark::register_soul_effect — 激活魂印效果链（此前只声明未实现，魂印函数从未执行）。
-// 把魂印 effect 包成 ContinuousEffect（BATTLE_ROUND_START 每回合执行、ON_STAGE 作用域、
-// source_id=魂印 id 同源去重），注册进魂印桶。每回合重注册（FSM handle_BattleRoundStart 调），
-// 幂等信号类魂印（如 2260 设 force_execute_on_pp0/ignore_pp）天然正确；
-// 一次性/条件激活语义留"激活谓词"任务。
-void SoulMark::activate_soul_mark(BattleContext* context, int owner) {
-    if (!context || owner < 0 || owner > 1 || !effect) {
-        return;
-    }
-    // 绑定参与者：args[0]=owner, args[1]=1-owner（魂印函数用 resolve_owner_from_args 读）。
+namespace {
+// 绑定参与者到魂印 args：args[0]=owner, args[1]=1-owner，其余透传
+// （魂印函数用 resolve_owner_from_args 读 args[0]）。
+EffectArgs bind_soulmark_args(const EffectArgs& args, int owner) {
     std::vector<int> merged;
     merged.push_back(owner);
     merged.push_back(1 - owner);
@@ -262,28 +271,68 @@ void SoulMark::activate_soul_mark(BattleContext* context, int owner) {
             merged.push_back(args.owned_int_args[i]);
         }
     }
-    EffectArgs bind_args(std::move(merged));
-    effect(context, bind_args);
+    return EffectArgs(std::move(merged));
+}
+} // namespace
+
+// SoulMark::activate_soul_mark — 战斗开始激活（OPERATION_ENTER_EXIT_STAGE，早于首轮技能选择）。
+// ① 注册全部节点到各自时点桶（round-1 各时点即就绪）；
+// ② 立即执行 early 信号节点（如 2260 的 ignore_pp/force_execute_on_pp0 须在选择前置位）。
+// 与 register_soul_effect（ROUND_START 每回合重注册重断言）配合。
+void SoulMark::activate_soul_mark(BattleContext* context, int owner) {
+    if (!context || owner < 0 || owner > 1) {
+        return;
+    }
+    if (has_program_) {
+        register_soul_effect(context, owner);  // 战斗开始即注册，round-1 时点可触发
+        for (const auto& node : program_) {
+            if (node.early && node.effect_fn) {
+                node.effect_fn(context, bind_soulmark_args(args, owner));
+            }
+        }
+        return;
+    }
+    if (!effect) {
+        return;
+    }
+    effect(context, bind_soulmark_args(args, owner));
 }
 
+// SoulMark::register_soul_effect — 激活魂印效果链。
+// 程序链路：每个节点按 trigger_state 注册进魂印桶（ON_STAGE 作用域、source_id=魂印 id
+// 同源去重、once 节点带 once_=回合限一次）。每回合重注册（FSM handle_BattleRoundStart 调）。
+// 单效果链路（旧）：effect 包成 ContinuousEffect 注册到 BATTLE_ROUND_START 每回合执行。
 void SoulMark::register_soul_effect(BattleContext* context, int owner) {
-    if (!context || owner < 0 || owner > 1 || !effect) {
+    if (!context || owner < 0 || owner > 1) {
         return;
     }
-    // 绑定参与者：args[0]=owner, args[1]=1-owner（魂印函数用 resolve_owner_from_args 读）。
-    std::vector<int> merged;
-    merged.push_back(owner);
-    merged.push_back(1 - owner);
-    if (args.owned_int_args.size() >= 2) {
-        for (std::size_t i = 2; i < args.owned_int_args.size(); ++i) {
-            merged.push_back(args.owned_int_args[i]);
+    if (has_program_) {
+        for (const auto& node : program_) {
+            if (!node.effect_fn) {
+                continue;
+            }
+            Effect wrapper(id, 0, owner, /*left_round=*/-1,
+                           bind_soulmark_args(args, owner), node.effect_fn);
+            auto ce = std::make_unique<ContinuousEffect>(
+                wrapper, node.trigger_state, owner, /*duration=*/-1, context->roundCount
+            );
+            ce->source_id_ = id;
+            ce->scope_ = EffectScope::ON_STAGE;
+            ce->once_ = node.once;
+            context->registerEffect(node.trigger_state, owner, std::move(ce),
+                                    EffectContainer::SoulMark);
         }
+        return;
     }
-    Effect wrapper(id, 0, owner, /*left_round=*/-1, EffectArgs(std::move(merged)), effect);
+    if (!effect) {
+        return;
+    }
+    Effect wrapper(id, 0, owner, /*left_round=*/-1, bind_soulmark_args(args, owner), effect);
     auto ce = std::make_unique<ContinuousEffect>(
         wrapper, State::BATTLE_ROUND_START, owner, /*duration=*/-1, context->roundCount
     );
     ce->source_id_ = id;
     ce->scope_ = EffectScope::ON_STAGE;
-    context->registerEffect(State::BATTLE_ROUND_START, owner, std::move(ce), EffectContainer::SoulMark);
+    context->registerEffect(State::BATTLE_ROUND_START, owner, std::move(ce),
+                            EffectContainer::SoulMark);
 }

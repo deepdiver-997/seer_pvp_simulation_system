@@ -24,6 +24,8 @@ public:
 
     // IEffectRegistry interface - for plugin use
     void registerSoulMark(int soulmark_id, EffectFn effect_fn) override;
+    void registerSoulMarkProgram(int soulmark_id,
+                                 const std::vector<SoulMarkNodeRef>& nodes) override;
     void registerSkillEffect(int effect_id, EffectFn effect_fn) override;
     void registerSoulMarks(
         const std::vector<std::pair<int, EffectFn>>& soulmarks) override;
@@ -32,6 +34,9 @@ public:
 
     // 手动注册效果（不通过动态库）
     void registerEffect(int soulmarkId, EffectFn effect);
+
+    // 查询魂印程序（多时点节点）。未注册程序返回 nullptr（调用方回退单效果链路）。
+    const std::vector<SoulMarkNodeRef>* getSoulMarkProgram(int soulmarkId) const;
 
     // 检查是否已初始化
     bool isInitialized() const { return initialized_; }
@@ -57,6 +62,8 @@ private:
 
     // 缓存映射表：魂印ID -> 效果函数
     std::unordered_map<int, EffectFn> effect_cache_;
+    // 魂印程序缓存：魂印ID -> 多时点节点（程序模型；单效果链路不在此表）。
+    std::unordered_map<int, std::vector<SoulMarkNodeRef>> program_cache_;
     mutable std::shared_mutex cache_mutex_;
 
     // 加载的动态库（保持加载状态，防止函数指针失效）

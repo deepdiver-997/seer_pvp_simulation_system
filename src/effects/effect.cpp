@@ -259,6 +259,13 @@ void EffectFactory::registerSoulMark(int soulmark_id, EffectFn effect_fn) {
     (void)effect_fn;
 }
 
+void EffectFactory::registerSoulMarkProgram(
+    int soulmark_id, const std::vector<SoulMarkNodeRef>& nodes) {
+    // EffectFactory doesn't handle soul marks（魂印程序归 SoulMarkManager）
+    (void)soulmark_id;
+    (void)nodes;
+}
+
 void EffectFactory::registerSkillEffect(int effect_id, EffectFn effect_fn) {
     registerEffect(effect_id, effect_fn);
 }

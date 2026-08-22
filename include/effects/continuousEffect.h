@@ -83,6 +83,8 @@ public:
     int source_id_ = 0;
     // 作用域：ON_STAGE（切换作废）/ TEAM（切换保留，不可被清回合类作废）
     EffectScope scope_ = EffectScope::ON_STAGE;
+    // 回合限一次：执行一次后由 execute_bucket_actions 移除（下回合重注册重新生效）。
+    bool once_ = false;
     // 效果类别（GENERIC / ROUND / SKILL_EXEC）
     EffectKind kind_ = EffectKind::GENERIC;
 

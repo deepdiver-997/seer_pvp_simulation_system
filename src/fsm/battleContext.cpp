@@ -87,8 +87,8 @@ void execute_bucket_actions(EffectBucket& bucket, int robotId, State state, int 
     }
 
     auto& robotEffects = state_it->second[robotId];
+    std::vector<uint64_t> once_keys;  // 回合限一次：本趟执行后移除
     for (auto& [key, effect] : robotEffects) {
-        (void)key;
         // ON_STAGE 效果：检查是否被断回合/切换作废（valid_id 版本号不匹配）
         // TEAM 效果不检查版本号 → 切换/清回合类不失效
         if (effect->scope_ == EffectScope::ON_STAGE
@@ -97,7 +97,14 @@ void execute_bucket_actions(EffectBucket& bucket, int robotId, State state, int 
         }
         if (!effect->isExpired(roundCount)) {
             (*effect)(ctx);
+            if (effect->once_) {
+                once_keys.push_back(key);
+            }
         }
+    }
+    // 回合限一次：移除本趟执行过的 once 效果（map 迭代时不可 erase，故收集后统一删）。
+    for (uint64_t key : once_keys) {
+        robotEffects.erase(key);
     }
     // 不在此处删除过期/被断效果 — 统一在 cleanup_expired_effects() 处理
 }
