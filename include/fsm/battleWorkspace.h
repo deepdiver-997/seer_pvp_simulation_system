@@ -100,6 +100,10 @@ struct BattleWorkspace {
     // 效果在 ROUND_START/SKILL_EFFECT 置位；deal_damage 据此跳过对应银行的吸收。
     bool ignore_shield[2]{};   // 按攻击方索引
 
+    // 最近一次恢复的实际体力值（按目标索引；封回血/恢复效果修正后的值）。
+    // heal 原语写入；吃月亮二类（按实际恢复值）效果读取。
+    int last_heal_amount[2]{};
+
     //========== 技能威力视图层 ==========
     // 本回合视角的技能威力：攻击时由 resolve_skill_execution 物化 skill.power，
     // 效果（如无相谛 179"属性相同威力提升"、未来黯玉咒言随机/累积威力）在

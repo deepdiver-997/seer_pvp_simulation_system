@@ -232,6 +232,12 @@ enum class DrainHpResult {
  */
 DrainHpResult drain_hp(BattleContext* ctx, int actor, int target, int fraction_denom);
 
+/**
+ * drain_hp_amount - 吸取固定伤害：目标掉 amount 固定伤害，actor 恢复等量。
+ * 恢复走 heal 原语（封回血/恢复效果修正生效；被封则吸不到血）。
+ */
+DrainHpResult drain_hp_amount(BattleContext* ctx, int actor, int target, int amount);
+
 enum class KillResult {
     SUCCESS,        // 秒杀（目标体力归 0）
     ALREADY_DEFEATED,

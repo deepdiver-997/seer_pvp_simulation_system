@@ -14,12 +14,15 @@
  * - DAMAGE   : 免伤
  * - STAT_DROP: 免弱（能力下降免疫）
  * - ANOMALY  : 异常免疫，用 anomaly_mask 细分（0 = 全 36 异常免疫；否则按位）
+ * - HEAL_BLOCK: 封回血（封锁体力回复）。位覆盖时点仿魂免：coverage 全置位=闭环恒封，
+ *               只含部分时点=低级，未覆盖时点的恢复有效（heal 原语按 currentState 查）
  */
 enum class ImmunityType {
     BREAK,
     DAMAGE,
     STAT_DROP,
     ANOMALY,
+    HEAL_BLOCK,
 };
 
 /**

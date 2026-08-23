@@ -335,6 +335,32 @@ StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta
     return StatChangeResult::SUCCESS;
 }
 
+// 内部：按指定量恢复，返回实际恢复量（封回血检查 + 恢复效果修正 + 记录 last_heal_amount）。
+static int heal_impl(BattleContext* ctx, int target, int heal_amount) {
+    ElfPet& pet = ctx->getPet(target);
+    if (heal_amount <= 0) {
+        ctx->ws.last_heal_amount[target] = 0;
+        return 0;
+    }
+    // 封回血：本时点覆盖内封锁体力回复（位覆盖仿魂免——coverage 全置位=闭环恒封；
+    // 只含部分时点=低级，未覆盖时点的恢复有效）。
+    if (ctx->is_immune(target, ImmunityType::HEAL_BLOCK, ctx->currentState)) {
+        ctx->ws.last_heal_amount[target] = 0;
+        return 0;
+    }
+    // 恢复效果修正%（正=提升，负=降低；封回血=-100 等价归零）。
+    heal_amount = heal_amount * (100 + ctx->heal_mod_pct[target]) / 100;
+    if (heal_amount < 0) {
+        heal_amount = 0;
+    }
+    const int max_hp = pet.numericalBase[NumericalPropertyIndex::HP];
+    const int hp_before = pet.hp;
+    pet.hp = std::min(max_hp, pet.hp + heal_amount);
+    const int actual = pet.hp - hp_before;
+    ctx->ws.last_heal_amount[target] = actual;
+    return actual;
+}
+
 HealResult heal(BattleContext* ctx, int target, int fraction_denom) {
     if (!ctx || target < 0 || target > 1) {
         return HealResult::INVALID_PARAM;
@@ -347,7 +373,7 @@ HealResult heal(BattleContext* ctx, int target, int fraction_denom) {
     } else {
         heal_amount = max_hp;  // 恢复全部
     }
-    pet.hp = (pet.hp + heal_amount > max_hp) ? max_hp : pet.hp + heal_amount;
+    heal_impl(ctx, target, heal_amount);
     return HealResult::SUCCESS;
 }
 
@@ -406,10 +432,23 @@ DrainHpResult drain_hp(BattleContext* ctx, int actor, int target, int fraction_d
     const int max_hp = std::max(1, defender.numericalProperties[NumericalPropertyIndex::HP]);
     const int amount = std::max(1, max_hp / fraction_denom);
     deal_damage(ctx, target, amount, DamageKind::FIXED, actor);
-    // 自身恢复等量（clamp 到最大体力）
-    ElfPet& healer = ctx->getPet(actor);
-    const int heal_max = std::max(1, healer.numericalProperties[NumericalPropertyIndex::HP]);
-    healer.hp = std::min(heal_max, healer.hp + amount);
+    // 自身恢复等量——走 heal_impl（封回血/恢复效果修正生效；被封则吸不到血）
+    heal_impl(ctx, actor, amount);
+    return DrainHpResult::SUCCESS;
+}
+
+// drain_hp_amount — 吸取固定伤害（固定量版；恢复同样走 heal_impl）。
+DrainHpResult drain_hp_amount(BattleContext* ctx, int actor, int target, int amount) {
+    if (!ctx || actor < 0 || actor > 1 || target < 0 || target > 1
+        || amount <= 0 || actor == target) {
+        return DrainHpResult::INVALID_PARAM;
+    }
+    ElfPet& defender = ctx->getPet(target);
+    if (defender.hp <= 0) {
+        return DrainHpResult::TARGET_DEFEATED;
+    }
+    deal_damage(ctx, target, amount, DamageKind::FIXED, actor);
+    heal_impl(ctx, actor, amount);
     return DrainHpResult::SUCCESS;
 }
 

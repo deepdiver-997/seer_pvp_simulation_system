@@ -143,6 +143,7 @@ public:
     int  crit_resist_pct[2]{};    // 暴击伤害抗性%（削减暴击加成部分）
     int  pink_reduce_pct[2]{}; // 减粉%（百分比免减，固定+百分比通用）
     bool pink_to_true[2]{};    // 粉转真：被免疫/抗性/减粉挡下时改以真实伤害结算
+    int  heal_mod_pct[2]{};    // 恢复效果修正%（正=提升，负=降低；封回血=-100 等价），heal 原语应用
 
     //--- 反弹/转化异常（on-stage 作用域）---
     bool reflect_anomaly[2]{};                        // 弹控：免疫异常时反弹给施放方（最多反弹 1 次防打乒乓球）
@@ -299,6 +300,7 @@ public:
         crit_resist_pct[owner] = 0;
         pink_reduce_pct[owner] = 0;
         pink_to_true[owner] = false;
+        heal_mod_pct[owner] = 0;             // 恢复效果修正不继承
         reflect_anomaly[owner] = false;      // 弹控不继承
         anomaly_conversion[owner].clear();   // 异常转化规则不继承
         elf_element_view_bound_slot[owner] = -1;  // 新精灵下次 sync 重基系别
@@ -325,6 +327,7 @@ public:
         crit_resist_pct[0] = crit_resist_pct[1] = 0;
         pink_reduce_pct[0] = pink_reduce_pct[1] = 0;
         pink_to_true[0] = pink_to_true[1] = false;
+        heal_mod_pct[0] = heal_mod_pct[1] = 0;
         reflect_anomaly[0] = reflect_anomaly[1] = false;
         anomaly_conversion[0].clear();
         anomaly_conversion[1].clear();
