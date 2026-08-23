@@ -163,6 +163,8 @@ void BattleContext::init_battle() {
     // 初始化逻辑
     on_stage[0] = 0;
     on_stage[1] = 0;
+    elf_element_view_bound_slot[0] = -1;  // 首回合 sync 时从 pet.elementalAttributes 基线系别
+    elf_element_view_bound_slot[1] = -1;
     clear_all_on_stage_abnormal_statuses();
     reset_operation_collection();
     roundChoice[0][0] = -1;

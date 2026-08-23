@@ -193,7 +193,15 @@ void sync_workspace_from_on_stage(BattleContext* ctx) {
         const ElfPet& pet = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]];
         ctx->ws.battle_attrs[robot_id] = pet.numericalProperties;
         std::copy(std::begin(pet.levels), std::end(pet.levels), std::begin(ctx->ws.view_levels[robot_id]));
-        std::copy(std::begin(pet.elementalAttributes), std::end(pet.elementalAttributes), std::begin(ctx->ws.view_elementalAttributes[robot_id]));
+        // 精灵系别半持久化视图：绑定的精灵槽变化（开战首回合 -1 / 换宠）→ 从 pet 重基，
+        // 否则保留（同精灵跨回合改系别效果存活）；每回合把视图写入 workspace。
+        if (ctx->elf_element_view_bound_slot[robot_id] != ctx->on_stage[robot_id]) {
+            std::copy(std::begin(pet.elementalAttributes), std::end(pet.elementalAttributes),
+                      std::begin(ctx->elf_element_view[robot_id]));
+            ctx->elf_element_view_bound_slot[robot_id] = ctx->on_stage[robot_id];
+        }
+        std::copy(std::begin(ctx->elf_element_view[robot_id]), std::end(ctx->elf_element_view[robot_id]),
+                  std::begin(ctx->ws.view_elementalAttributes[robot_id]));
         ctx->ws.cached_speed[robot_id] = pet.numericalProperties[NumericalPropertyIndex::SPEED];
     }
 }

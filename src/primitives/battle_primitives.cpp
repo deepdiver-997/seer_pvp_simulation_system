@@ -50,12 +50,22 @@ void emit_anomaly_events(BattleContext* ctx, int target, int anomaly_id, int act
 //   2. 未来新增阻止条件时，只需在此函数加检查分支，所有调用方自动生效
 //   3. 日志/调试在此集中输出
 // ----------------------------------------------------------------
-ApplyAnomalyResult apply_anomaly(BattleContext* ctx,
-                                 int target,
-                                 int anomaly_id,
-                                 int duration_rounds,
-                                 int actor) {
-    // [Step 1] 参数校验
+// 转化异常（单跳）：入→出。免疫异常(21)也可被转化——"让对手抗性抵抗挂上免疫异常图标，
+// 再转化掉"的绕过魂免+抗性 exploit 路径。
+static int resolve_anomaly_conversion(BattleContext* ctx, int target, int incoming) {
+    const auto& conv = ctx->anomaly_conversion[target];
+    const auto it = conv.find(incoming);
+    return it != conv.end() ? it->second : incoming;
+}
+
+// 内部实现。reflect_depth = 反弹深度（0=原生施加；1=反弹回来：不再反弹、不过抗性）。
+static ApplyAnomalyResult apply_anomaly_impl(BattleContext* ctx,
+                                             int target,
+                                             int anomaly_id,
+                                             int duration_rounds,
+                                             int actor,
+                                             int reflect_depth) {
+    // [1] 参数校验
     if (target < 0 || target > 1) {
         return ApplyAnomalyResult::INVALID_PARAM;
     }
@@ -68,56 +78,92 @@ ApplyAnomalyResult apply_anomaly(BattleContext* ctx,
 
     ElfPet& pet = ctx->getPet(target);
 
-    // [Step 2] 目标存活检查
+    // [2] 目标存活检查
     if (pet.hp <= 0) {
         return ApplyAnomalyResult::TARGET_DEFEATED;
     }
 
-    // [Step 3] 魂免检查 — 免疫内核 is_immune(ANOMALY) + Mark ID 0 兜底
-    // 免疫内核统一回答"目标在当前时点是否免疫该异常"：
-    // - 高级魂免 = 全时点覆盖；低级 = 只覆盖部分时点，未覆盖时点这里返回 false。
-    // - anomaly_mask 细分：全免 / 魂免(控制位集合) / 天生免疫具体异常。
-    if (ctx->is_immune(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id)
-        || has_mark(pet.marks, 0)) {
+    // 弹控：目标免疫时把异常反弹给施放方。最多反弹 1 次（depth==1 不再弹）——防双方弹控打乒乓球。
+    const auto reflect = [&]() -> ApplyAnomalyResult {
+        if (reflect_depth == 0 && ctx->reflect_anomaly[target]
+            && actor >= 0 && actor != target) {
+            apply_anomaly_impl(ctx, actor, anomaly_id, duration_rounds,
+                               /*actor=*/target, /*reflect_depth=*/1);
+            return ApplyAnomalyResult::REFLECTED;
+        }
         return ApplyAnomalyResult::TARGET_IMMUNE;
+    };
+
+    // [3] 次免/回合类免疫（soul=false）—— 官方优先级：先于抗性判定挡下。
+    if (ctx->is_immune_effect(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id)) {
+        return reflect();
     }
 
-    // [Step 4] 同种异常 — 回合覆盖
-    bool already_has_same = ctx->has_active_abnormal_status(target, anomaly_id);
+    // [4] 异常抗性 roll（弹回的异常不过抗性——depth>0 跳过；官方必修3/选修7）。
+    // 抗性成功：直写附加"免疫异常"异常(21, 2回合)——**击穿魂免**（不走免疫检查）；
+    // 先走转化（攻击方可预置 conversion[target][21]=Y 把抵抗结果直接转成 Y）。
+    if (reflect_depth == 0 && pet.resistance.isResistantTo(anomaly_id)) {
+        const int resolved = resolve_anomaly_conversion(
+            ctx, target, static_cast<int>(AbnormalStatusId::AbnormalImmunity));
+        ctx->set_abnormal_status_end_round(target, resolved, ctx->roundCount + 2);
+        emit_anomaly_events(ctx, target, resolved, actor);
+        return ApplyAnomalyResult::RESISTED_BY_RESISTANCE;
+    }
+
+    // [5] 魂免（soul=true）—— 抗性判定失败后才查（官方优先级）。
+    if (ctx->is_immune_soul(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id)
+        || has_mark(pet.marks, 0)) {
+        return reflect();
+    }
+
+    // [6] 转化（单跳）：入→出，直接施加（绕过抗性/免疫的转换路径）。
+    const int resolved = resolve_anomaly_conversion(ctx, target, anomaly_id);
+    const bool converted = (resolved != anomaly_id);
+
+    // [7] 同种异常 — 回合覆盖
+    bool already_has_same = ctx->has_active_abnormal_status(target, resolved);
     if (already_has_same) {
-        int current_end = ctx->get_abnormal_status_end_round(target, anomaly_id);
+        int current_end = ctx->get_abnormal_status_end_round(target, resolved);
         int current_remaining = current_end - ctx->roundCount;
         if (duration_rounds > current_remaining) {
-            ctx->set_abnormal_status_end_round(target, anomaly_id,
+            ctx->set_abnormal_status_end_round(target, resolved,
                                                ctx->roundCount + duration_rounds);
-            emit_anomaly_events(ctx, target, anomaly_id, actor);
-            return ApplyAnomalyResult::DURATION_EXTENDED;
+            emit_anomaly_events(ctx, target, resolved, actor);
+            return converted ? ApplyAnomalyResult::CONVERTED
+                             : ApplyAnomalyResult::DURATION_EXTENDED;
         }
         // 新回合数不更长，不覆盖，但也不算失败——异常已经存在
-        return ApplyAnomalyResult::SUCCESS;
+        return converted ? ApplyAnomalyResult::CONVERTED : ApplyAnomalyResult::SUCCESS;
     }
 
-    // [Step 6] 特殊阻止检查（预留扩展点）
-    // 未来在此添加：抗性系统（百分比）/ 装备称号免疫 / 场地阻止 / 保护机制。
-    // 建议：每个阻止条件用独立的辅助函数，在此依次调用。
-
-    // [Step 7] 执行施加
+    // [8] 执行施加
     // abnormal_status_end_round[target][anomaly_id] 是异常状态的唯一权威数据源。
-    ctx->set_abnormal_status_end_round(target, anomaly_id,
+    ctx->set_abnormal_status_end_round(target, resolved,
                                        ctx->roundCount + duration_rounds);
     // 成功路径 emit：异常状态实际改变才通知第三方（控场额外发 EVENT_CONTROLLED）
-    emit_anomaly_events(ctx, target, anomaly_id, actor);
+    emit_anomaly_events(ctx, target, resolved, actor);
 
 #ifdef BATTLE_FSM_VERBOSE_DEFAULT
     std::cout << "[apply_anomaly] target=" << target
-              << " anomaly=" << abnormal_status_name_cn(anomaly_id)
-              << "(" << anomaly_id << ")"
+              << " anomaly=" << abnormal_status_name_cn(resolved)
+              << "(" << resolved << ")"
               << " duration=" << duration_rounds
               << " end_round=" << (ctx->roundCount + duration_rounds)
+              << (converted ? " [converted]" : "")
               << std::endl;
 #endif
 
-    return ApplyAnomalyResult::SUCCESS;
+    return converted ? ApplyAnomalyResult::CONVERTED : ApplyAnomalyResult::SUCCESS;
+}
+
+// 公开入口：原生施加（reflect_depth=0）。
+ApplyAnomalyResult apply_anomaly(BattleContext* ctx,
+                                 int target,
+                                 int anomaly_id,
+                                 int duration_rounds,
+                                 int actor) {
+    return apply_anomaly_impl(ctx, target, anomaly_id, duration_rounds, actor,
+                              /*reflect_depth=*/0);
 }
 
 // ----------------------------------------------------------------
@@ -175,11 +221,31 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     }
 
     int effective = amount;
+    // 粉转真时按原始量（PERCENT 已换算成具体数值）转，故保留 pre_resist。
+    int pre_resist = amount;
     if (kind == DamageKind::PERCENT) {
         const int max_hp = pet.numericalBase[NumericalPropertyIndex::HP];
         effective = max_hp > 0 ? max_hp * amount / 100 : 0;
         if (effective <= 0) {
             return;
+        }
+        pre_resist = effective;
+    }
+
+    // 粉伤抗性层（固定/百分比伤害）：免疫粉伤 → 伤害抗性% → 减粉% 逐级削减（官方必修8/选修6）。
+    // 被挡下（<=0）且粉转真 → 改以真实伤害结算（吃护盾、穿抗性/免疫）。TRUE 绕过此层。
+    if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
+        if (ctx->pink_immune[target]) {
+            effective = 0;
+        } else {
+            effective -= effective * ctx->pink_resist_pct[target] / 100;
+            effective -= effective * ctx->pink_reduce_pct[target] / 100;
+        }
+        if (effective <= 0) {
+            if (ctx->pink_to_true[target]) {
+                deal_damage(ctx, target, pre_resist, DamageKind::TRUE, actor);
+            }
+            return;  // 被免粉挡下：目标体力不变（免粉补偿一类在效果侧比较 HP）
         }
     }
 

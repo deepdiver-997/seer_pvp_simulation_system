@@ -128,6 +128,23 @@ public:
     bool ignore_pp[2]{};             // 魂印激活：PP=0 技能仍可选（不受PP限制）
     bool pp_reverse[2]{};            // 魂印激活：使用技能后 PP 反转（当前PP与已损失互换，无为觉者 2260）
 
+    //--- 精灵系别半持久化视图（当前在场精灵有效系别）---
+    // 改系别效果（属性反转/龙琰类）写这里，跨回合保留（ws 每回合 reset 会清，故放 context）。
+    // bound_slot 记录已绑定的精灵槽：sync_workspace_from_on_stage 在槽变化时从
+    // pet.elementalAttributes 重基（开战首回合 bound=-1 自动基线；换宠自动重基），同槽则保留。
+    int elf_element_view[2][2]{};              // 当前在场精灵有效系别
+    int elf_element_view_bound_slot[2]{-1, -1};  // 已绑定槽（-1=未基线）
+
+    //--- 粉伤抗性（on-stage 作用域，切换/清场清）---
+    bool pink_immune[2]{};     // 免疫粉伤（固定/百分比伤害）
+    int  pink_resist_pct[2]{}; // 伤害抗性%（减固定/百分比伤害）
+    int  pink_reduce_pct[2]{}; // 减粉%（百分比免减）
+    bool pink_to_true[2]{};    // 粉转真：被免疫/抗性/减粉挡下时改以真实伤害结算
+
+    //--- 反弹/转化异常（on-stage 作用域）---
+    bool reflect_anomaly[2]{};                        // 弹控：免疫异常时反弹给施放方（最多反弹 1 次防打乒乓球）
+    std::array<std::map<int, int>, 2> anomaly_conversion;  // [目标] 入异常 id → 出异常 id（单跳转换）
+
     //--- 技能效果执行表 ---
     // 内层用 std::map<uint64_t, ...>：key = (source_id << 32) | effect_id，
     // 同源同 effect 新注册自动覆盖旧（同源去重）；source_id==0 用唯一自增 key 不参与去重。
@@ -273,6 +290,13 @@ public:
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
         skill_seals[owner].clear();  // 拦截挂在被拦截方桶：换宠洗掉自己身上的封属性
+        pink_immune[owner] = false;          // 粉伤抗性不继承给新精灵
+        pink_resist_pct[owner] = 0;
+        pink_reduce_pct[owner] = 0;
+        pink_to_true[owner] = false;
+        reflect_anomaly[owner] = false;      // 弹控不继承
+        anomaly_conversion[owner].clear();   // 异常转化规则不继承
+        elf_element_view_bound_slot[owner] = -1;  // 新精灵下次 sync 重基系别
     }
 
     //--- 清空效果 ---
@@ -290,6 +314,14 @@ public:
         ignore_pp[1] = false;
         pp_reverse[0] = false;
         pp_reverse[1] = false;
+        pink_immune[0] = pink_immune[1] = false;
+        pink_resist_pct[0] = pink_resist_pct[1] = 0;
+        pink_reduce_pct[0] = pink_reduce_pct[1] = 0;
+        pink_to_true[0] = pink_to_true[1] = false;
+        reflect_anomaly[0] = reflect_anomaly[1] = false;
+        anomaly_conversion[0].clear();
+        anomaly_conversion[1].clear();
+        elf_element_view_bound_slot[0] = elf_element_view_bound_slot[1] = -1;
         for (int p = 0; p < 2; ++p) {
             for (ElfPet& pet : seerRobot[p].elfPets) {
                 pet.soulmark_storage.clear();  // 魂印持久槽：战斗结束/清场清空
@@ -353,9 +385,10 @@ public:
      * @return source_id（revoke 用）
      */
     int grant_immunity(int owner, ImmunityType type, uint64_t coverage,
-                       uint64_t anomaly_mask = 0, int duration_rounds = 0, int source_id = 0) {
+                       uint64_t anomaly_mask = 0, int duration_rounds = 0, int source_id = 0,
+                       bool soul_immunity = false) {
         return immunity_center_.grant(owner, type, coverage, anomaly_mask,
-                                      duration_rounds, roundCount, source_id);
+                                      duration_rounds, roundCount, source_id, soul_immunity);
     }
 
     void revoke_immunity(int owner, int source_id) {
@@ -368,6 +401,14 @@ public:
      */
     bool is_immune(int owner, ImmunityType type, State timing, int status_id = 0) const {
         return immunity_center_.is_immune(owner, type, state_coverage_bit(timing), roundCount, status_id);
+    }
+
+    // 细分查询：次免/回合类免疫（soul=false）先于抗性判定；魂免（soul=true）在抗性失败后才查。
+    bool is_immune_effect(int owner, ImmunityType type, State timing, int status_id = 0) const {
+        return immunity_center_.is_immune_effect(owner, type, state_coverage_bit(timing), roundCount, status_id);
+    }
+    bool is_immune_soul(int owner, ImmunityType type, State timing, int status_id = 0) const {
+        return immunity_center_.is_immune_soul(owner, type, state_coverage_bit(timing), roundCount, status_id);
     }
 
     //--- 伤害管线便利方法 ---

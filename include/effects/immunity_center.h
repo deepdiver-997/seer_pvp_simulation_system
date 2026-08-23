@@ -43,6 +43,7 @@ struct ImmunityProvider {
     bool active;
     int condition_id;       // 预留：条件目录枚举，-1 = 无条件（live 条件后续迭代）
     int source_id;          // 授予句柄，revoke / 复用更新用
+    bool soul = false;      // true=魂免（抗性优先判定后才查）；false=次免/回合类免疫效果（先于抗性挡）
 };
 
 /**
@@ -74,7 +75,8 @@ public:
      * @return source_id    用于 revoke / 下次复用
      */
     int grant(int owner, ImmunityType type, uint64_t coverage, uint64_t anomaly_mask,
-              int duration_rounds, int register_round, int source_id = 0) {
+              int duration_rounds, int register_round, int source_id = 0,
+              bool soul = false) {
         const int sid = (source_id != 0) ? source_id : next_source_id_++;
         auto& list = providers_[owner];
         for (auto& p : list) {
@@ -87,11 +89,12 @@ public:
                 p.anomaly_mask = anomaly_mask;
                 p.active = true;
                 p.condition_id = -1;
+                p.soul = soul;
                 return sid;
             }
         }
         list.push_back(ImmunityProvider{owner, type, register_round, duration_rounds,
-                                        coverage, anomaly_mask, true, -1, sid});
+                                        coverage, anomaly_mask, true, -1, sid, soul});
         return sid;
     }
 
@@ -118,13 +121,15 @@ public:
      * @param status_id   ANOMALY 类型专用：被查询的异常状态 id；其余类型忽略
      */
     bool is_immune(int owner, ImmunityType type, uint64_t timing_bit,
-                   int current_round, int status_id = 0) const {
+                   int current_round, int status_id = 0,
+                   int soul_filter = -1) const {
         auto it = providers_.find(owner);
         if (it == providers_.end()) {
             return false;
         }
         for (const auto& p : it->second) {
             if (!p.active || p.type != type) continue;
+            if (soul_filter >= 0 && (p.soul ? 1 : 0) != soul_filter) continue;  // 魂免/效果免 细分
             if (p.duration_rounds > 0
                 && current_round - p.register_round >= p.duration_rounds) {
                 continue;  // 窗口已过，等 cleanup 回收
@@ -137,6 +142,17 @@ public:
             return true;
         }
         return false;
+    }
+
+    // 细分查询：异常施加按官方优先级分开查——次免/回合类免疫(soul=false) 先于抗性判定，
+    // 魂免(soul=true) 在抗性判定失败后才查。
+    bool is_immune_effect(int owner, ImmunityType type, uint64_t timing_bit,
+                          int current_round, int status_id = 0) const {
+        return is_immune(owner, type, timing_bit, current_round, status_id, /*soul_filter=*/0);
+    }
+    bool is_immune_soul(int owner, ImmunityType type, uint64_t timing_bit,
+                        int current_round, int status_id = 0) const {
+        return is_immune(owner, type, timing_bit, current_round, status_id, /*soul_filter=*/1);
     }
 
     /** 移除窗口已过的 Provider。由 BattleContext::cleanup_expired_effects 统一调用。 */

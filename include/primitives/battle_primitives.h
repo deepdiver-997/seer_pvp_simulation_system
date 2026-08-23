@@ -28,6 +28,9 @@ enum class ApplyAnomalyResult {
     INVALID_PARAM,         // 无效参数（anomaly_id 非法、target 非法）
     REPLACED_EXISTING,     // 替换了已有的控场类异常
     DURATION_EXTENDED,     // 同种异常已存在，延长了回合数
+    RESISTED_BY_RESISTANCE,// 异常抗性抵抗成功：直写附加"免疫异常"异常(21, 2回合)，击穿魂免
+    REFLECTED,             // 弹控：目标免疫并将异常反弹给施放方（最多反弹 1 次）
+    CONVERTED,             // 转化异常：进入异常时转为另一指定异常
 };
 
 /**
@@ -62,7 +65,8 @@ inline bool try_apply_anomaly(BattleContext* ctx,
     ApplyAnomalyResult r = apply_anomaly(ctx, target, anomaly_id, duration_rounds, actor);
     return r == ApplyAnomalyResult::SUCCESS
         || r == ApplyAnomalyResult::REPLACED_EXISTING
-        || r == ApplyAnomalyResult::DURATION_EXTENDED;
+        || r == ApplyAnomalyResult::DURATION_EXTENDED
+        || r == ApplyAnomalyResult::CONVERTED;
 }
 
 // ----------------------------------------------------------------

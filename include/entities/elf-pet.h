@@ -12,6 +12,7 @@
 #include <entities/common_trait.h>
 #include <entities/elemental-attributes.h>
 #include <entities/mark.h>
+#include <abnormal-system/resistance-system.h>
 #include <entities/numerical-properties.h>
 #include <entities/shield_bank.h>
 #include <entities/skills.h>
@@ -77,6 +78,7 @@ public:
         , skills(other.skills)
         , marks(other.marks)
         , soulmark_storage(other.soulmark_storage)
+        , resistance(other.resistance)
         , id(other.id)
         , name(other.name) {}
 
@@ -97,6 +99,7 @@ public:
         , skills(std::move(other.skills))
         , marks(std::move(other.marks))
         , soulmark_storage(std::move(other.soulmark_storage))
+        , resistance(std::move(other.resistance))
         , id(other.id)
         , name(std::move(other.name)) {}
 
@@ -119,6 +122,7 @@ public:
         skills = other.skills;
         marks = other.marks;
         soulmark_storage = other.soulmark_storage;
+        resistance = other.resistance;
         id = other.id;
         name = other.name;
         return *this;
@@ -143,6 +147,7 @@ public:
         skills = std::move(other.skills);
         marks = std::move(other.marks);
         soulmark_storage = std::move(other.soulmark_storage);
+        resistance = std::move(other.resistance);
         id = other.id;
         name = std::move(other.name);
         return *this;
@@ -155,6 +160,7 @@ public:
     Gender gender = Gender::NONE;
     SoulMark soulMark;
     CommonTrait commonTrait;
+    ResistanceSystem resistance;  // 异常抗性（训练刷出的概率抵抗；apply_anomaly 在魂免前 roll）
     numerical_properties numericalBase, numericalProperties;
     int& hp = numericalProperties[NumericalPropertyIndex::HP];
     std::array<int, 6> levels{};
