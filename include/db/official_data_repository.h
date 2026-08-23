@@ -152,7 +152,7 @@ public:
 
     // 从 types_relation（官方克制表）填充克制矩阵。
     // matrix[attacker_type_id][defender_type_id] ∈ {0, 1, 2}（0=微弱/免疫, 1=普通, 2=克制）。
-    bool load_elemental_restraints(std::vector<std::vector<int>>& matrix) const;
+    bool load_elemental_restraints(std::vector<std::vector<double>>& matrix) const;
 
 private:
     // 新 Unity 结构：双属性精灵 type 用合并 id（如 41=战斗地面），需分解为两个单属性 id。

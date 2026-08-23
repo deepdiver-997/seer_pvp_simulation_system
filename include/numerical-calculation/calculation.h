@@ -59,33 +59,24 @@ class Calculation {
         return static_cast<int>(result);
     }
     static double calculateRestraintMultiples(const int attacker[2], const int defender[2]) {
-        double multiples = 1.0;
-        if(attacker[1] == 0 && defender[1] == 0) {  //1 v 1
-            multiples = ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[0]];
-        } else if(attacker[1] != 0 && defender[1] != 0) {   //2 v 2
-            multiples = ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[0]] * ElementalAttributes::elementalAttributesRestraints[attacker[1]][defender[1]];
-        } else if(attacker[1] != 0) {   //2 v 1
-            int t1 = ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[0]];
-            int t2 = ElementalAttributes::elementalAttributesRestraints[attacker[1]][defender[0]];
-            if(t1 == 2 && t2 == 2)
-                multiples = 4;
-            else {
-                multiples = (t1 + t2) / 2.0; // Average of the two resistances
-                if(t1 == 0 || t2 == 0)
-                    multiples /= 2.0;
-            }
-        } else if(defender[1] != 0) {   //1 v 2
-            int t1 = ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[0]];
-            int t2 = ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[1]];
-            if(t1 == 2 && t2 == 2)
-                multiples = 4;
-            else {
-                multiples = (t1 + t2) / 2.0; // Average of the two resistances
-                if(t1 == 0 || t2 == 0)
-                multiples /= 2.0;
-            }
+        // 克制倍率矩阵存官方原始倍率 {0免疫, 0.5减半, 1普通, 2克制}。
+        // 双属性组合 = 各"属性对"倍率相乘（2v2/2v1/1v2 各两对）。
+        const double m00 =
+            ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[0]];
+        if (attacker[1] == 0 && defender[1] == 0) {  // 1 v 1
+            return m00;
         }
-        return multiples; // Placeholder for actual calculation logic
+        if (attacker[1] != 0 && defender[1] != 0) {  // 2 v 2
+            return m00
+                * ElementalAttributes::elementalAttributesRestraints[attacker[1]][defender[1]];
+        }
+        if (attacker[1] != 0) {  // 2 v 1：攻击方双属性各自对防御方单属性的倍率相乘
+            return m00
+                * ElementalAttributes::elementalAttributesRestraints[attacker[1]][defender[0]];
+        }
+        // 1 v 2：防御方双属性各自被攻击方单属性克制的倍率相乘
+        return m00
+            * ElementalAttributes::elementalAttributesRestraints[attacker[0]][defender[1]];
     }
     static inline bool involve(const int elf[2], const int skill[2]) {
         if(skill[1] == 0)

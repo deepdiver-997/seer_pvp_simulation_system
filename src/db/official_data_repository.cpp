@@ -643,7 +643,7 @@ std::pair<int, int> OfficialDataRepository::decompose_type(int type_id) const {
 }
 
 bool OfficialDataRepository::load_elemental_restraints(
-    std::vector<std::vector<int>>& matrix
+    std::vector<std::vector<double>>& matrix
 ) const {
     if (!db_) {
         last_error_ = "database is not open";
@@ -696,14 +696,9 @@ bool OfficialDataRepository::load_elemental_restraints(
             defender_id >= static_cast<int>(matrix[static_cast<std::size_t>(attacker_id)].size())) {
             continue;
         }
-        // 官方倍率 {0.0, 0.5, 1.0, 2.0} -> 引擎语义 {0=微弱/免疫, 1=普通, 2=克制}
-        int encoded = 1;
-        if (multiple >= 1.5) {
-            encoded = 2;
-        } else if (multiple < 0.75) {
-            encoded = 0;
-        }
-        matrix[static_cast<std::size_t>(attacker_id)][static_cast<std::size_t>(defender_id)] = encoded;
+        // 直接存官方原始倍率 {0.0 免疫, 0.5 减半, 1.0 普通, 2.0 克制}。
+        // 旧实现压缩成 int 三档把 0.5 减半丢成 0（免疫）→ 半克制伤害归 0 的 bug，已修复。
+        matrix[static_cast<std::size_t>(attacker_id)][static_cast<std::size_t>(defender_id)] = multiple;
     }
     return true;
 }
