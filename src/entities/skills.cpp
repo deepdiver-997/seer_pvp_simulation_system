@@ -368,11 +368,15 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         }
     }
 
-    // ② 门判定（次数类拦截：封属性/封攻击）：穿透感知消费。
+    // ② 门判定（拦截桶：封属性/封攻击）。检查自己桶里"针对自己"（target==owner）的条目。
     // 穿透只绕"封攻击"的可穿盔（seal_attack && penetrable）：封属性不被 699 穿透；
     // 条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。miss 已在 ① 提前 return。
+    // 次数型（remaining>0）命中消费一次；回合型（remaining_rounds>0）命中不消费。
     auto& seals = ctx->skill_seals[owner];
     for (auto it = seals.begin(); it != seals.end(); ++it) {
+        if (it->target != owner) {
+            continue;  // 防御：桶里非针对本方的条目（显式 target 过滤）
+        }
         const bool is_attribute = (type == SkillType::Attribute);
         const bool matches = is_attribute ? it->seal_attribute : it->seal_attack;
         if (!matches) {
@@ -381,9 +385,11 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         if (it->penetrable && ctx->ws.attack_credential[owner].ignore_attack_immunity) {
             continue;  // 可穿盔被穿透 → 保留次数（文档 5.2），继续看下一条
         }
-        --it->remaining;
-        if (it->remaining <= 0) {
-            seals.erase(it);
+        if (it->remaining > 0) {
+            --it->remaining;
+            if (it->remaining <= 0) {
+                seals.erase(it);
+            }
         }
         return SkillUsageResult::SEALED;
     }

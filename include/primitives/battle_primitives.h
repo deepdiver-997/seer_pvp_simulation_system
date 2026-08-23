@@ -111,20 +111,23 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 // ----------------------------------------------------------------
 
 /**
- * seal_skill - 给目标方挂技能拦截效果（次数类）。
+ * seal_skill - 给目标方挂技能拦截效果（封属性/封攻击）。
  *
- * "对手下1次属性技能失效"类效果用：目标方后续使用对应类别技能时被拦截（次数-1），
- * 拦截发生时技能按 SKILL_INVALID 处理。回合类拦截（被控）不归这里，走异常系统。
+ * "对手下N次属性技能失效"（次数型）/"对手3回合内属性技能无效"（回合型）类效果。
+ * 挂到**被拦截方**的桶（skill_seals[target]）：施放方切换不影响；被拦截方切换清空。
+ * 按 effect_id 覆盖去重（同效果重复挂 → 刷新次数/回合，不叠加）。
+ * 拦截发生时技能按 SKILL_INVALID 处理。回合型每回合递减、可被断回合清除。
  *
- * @param target     被拦截方 (0/1)
- * @param attribute  是否封属性技能
- * @param attack     是否封攻击技能
- * @param count      拦截次数（>0）
- * @param source_id  施放方（未知传 -1）
- * @param penetrable 可否被"无视攻击免疫"穿透（默认 true=可穿盔；false=条件盔/龙威）
+ * @param target         被拦截方 (0/1)
+ * @param effect_id      来源效果 id（覆盖去重 key）
+ * @param attribute      是否封属性技能
+ * @param attack         是否封攻击技能
+ * @param count          次数型拦截次数（>0）
+ * @param duration_rounds 回合型持续回合（>0 走回合型；0=次数型）
+ * @param penetrable     可否被"无视攻击免疫"穿透（默认 true=可穿盔；false=条件盔/龙威）
  */
-void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
-                int count, int source_id = -1, bool penetrable = true);
+void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
+                int count, int duration_rounds = 0, bool penetrable = true);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。

@@ -195,6 +195,27 @@ void sync_workspace_from_on_stage(BattleContext* ctx) {
     }
 }
 
+// 换宠：清理旧在场精灵公共状态 → 更新 on_stage → 新精灵魂印激活 → ws 同步。
+// 被拦截方换宠会清掉自己身上的拦截（invalidate 清 skill_seals），即"换宠洗掉封属性"。
+void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
+    if (!ctx || robot_id < 0 || robot_id > 1 || target_slot < 0 || target_slot >= 6) {
+        return;
+    }
+    if (ctx->on_stage[robot_id] == target_slot) {
+        return;  // 切到同一只，无事发生
+    }
+    // ① 清旧宠公共状态：ON_STAGE 效果 + 穿透授予 + 命中失效 + 魂印信号 + 拦截桶
+    ctx->invalidate_on_stage_effects(robot_id);
+    // ② 清旧宠异常状态
+    ctx->clear_on_stage_abnormal_statuses(robot_id);
+    // ③ 更新在场槽位
+    ctx->on_stage[robot_id] = target_slot;
+    // ④ 新精灵魂印激活（early 信号立即生效；ROUND_START 节点下回合重注册）
+    ctx->getPet(robot_id).soulMark.activate_soul_mark(ctx, robot_id);
+    // ⑤ ws 同步新精灵数值（伤害/先手判定用）
+    sync_workspace_from_on_stage(ctx);
+}
+
 void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
     if (!ctx || attacker_id < 0 || attacker_id > 1) {
         return;
@@ -789,6 +810,11 @@ void BattleFsm::handle_BattleFirstActionStart(BattleContext* battleContext) {
     battleContext->execute_registered_actions(first_mover_id, State::BATTLE_FIRST_ACTION_START);
     settle_staged_action_start_abnormal_damage(battleContext, first_mover_id);
     if (should_skip_action_flow(battleContext, first_mover_id)) {
+        // 主动切换：CHOOSE_PET（区别于被控跳过的 NONE/技能但被控）→ 在此执行换宠
+        if (battleContext->roundChoice[first_mover_id][0]
+            == static_cast<int>(BattleFsm::ActionType::CHOOSE_PET)) {
+            perform_switch(battleContext, first_mover_id, battleContext->roundChoice[first_mover_id][1]);
+        }
         log("Battle: First mover skips main action flow and jumps to extra-action/death timing.");
         battleContext->currentState = State::BATTLE_FIRST_EXTRA_ACTION;
         return;
@@ -893,6 +919,11 @@ void BattleFsm::handle_BattleSecondActionStart(BattleContext* battleContext) {
     battleContext->execute_registered_actions(second_mover_id, State::BATTLE_SECOND_ACTION_START);
     settle_staged_action_start_abnormal_damage(battleContext, second_mover_id);
     if (should_skip_action_flow(battleContext, second_mover_id)) {
+        // 主动切换：CHOOSE_PET（区别于被控跳过的 NONE/技能但被控）→ 在此执行换宠
+        if (battleContext->roundChoice[second_mover_id][0]
+            == static_cast<int>(BattleFsm::ActionType::CHOOSE_PET)) {
+            perform_switch(battleContext, second_mover_id, battleContext->roundChoice[second_mover_id][1]);
+        }
         log("Battle: Second mover skips main action flow and jumps to extra-action/death timing.");
         battleContext->currentState = State::BATTLE_SECOND_EXTRA_ACTION;
         return;
@@ -1010,6 +1041,17 @@ void BattleFsm::handle_BattleRoundReductionAllRoundMinus(BattleContext* battleCo
     log("Battle: Round Reduction All Round Minus.");
     // 先执行注册在本时点的效果（包括断回合效果本身）
     battleContext->execute_registered_actions(-1, State::BATTLE_ROUND_REDUCTION_ALL_ROUND_MINUS);
+    // 回合型技能拦截（remaining_rounds>0）每回合递减，到 0 移除
+    for (int p = 0; p < 2; ++p) {
+        auto& seals = battleContext->skill_seals[p];
+        std::erase_if(seals, [](BattleContext::SkillSeal& s) {
+            if (s.remaining_rounds > 0) {
+                --s.remaining_rounds;
+                return s.remaining_rounds <= 0;
+            }
+            return false;
+        });
+    }
     // 然后统一清理所有已过期的回合类效果
     battleContext->cleanup_expired_effects();
     battleContext->generateState();
@@ -1099,6 +1141,8 @@ void BattleFsm::handle_ChooseAfterDeath(BattleContext* battleContext) {
         return;
     }
     operation(battleContext, buf[0], static_cast<ActionType>(buf[1]), buf[2]);
+    // 死亡换宠：死宠离场 → 实际执行换宠（清死宠公共状态 → 新宠登场激活）
+    perform_switch(battleContext, buf[0], buf[2]);
     battleContext->generateState();
 }
 

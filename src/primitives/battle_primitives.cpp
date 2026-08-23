@@ -140,12 +140,19 @@ BreakResult break_round_effects(BattleContext* ctx, int target) {
     }
 
     // 对手没有可清除的回合类效果 → 清除失败（无事发生），不 emit。
-    if (!ctx->has_round_effects(target)) {
+    // 回合型技能拦截（remaining_rounds>0）也算回合类效果（可被断清除）。
+    auto& seals = ctx->skill_seals[target];
+    const bool has_round_seal = std::any_of(
+        seals.begin(), seals.end(),
+        [](const BattleContext::SkillSeal& s) { return s.remaining_rounds > 0; });
+    if (!ctx->has_round_effects(target) && !has_round_seal) {
         return BreakResult::NO_EFFECTS;
     }
 
     // 成功：机械无效化 + 事件（补偿 watcher 在 FSM drain 点投递）
     ctx->invalidate_all_round_effects(target);
+    // 断回合清回合型技能拦截（次数型 remaining>0 保留）
+    std::erase_if(seals, [](const BattleContext::SkillSeal& s) { return s.remaining_rounds > 0; });
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_BREAK, ctx->opponent(target), target});
     return BreakResult::SUCCESS;
 }
@@ -198,16 +205,28 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target, actual_damage});
 }
 
-void seal_skill(BattleContext* ctx, int target, bool attribute, bool attack,
-                int count, int source_id, bool penetrable) {
+void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
+                int count, int duration_rounds, bool penetrable) {
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
     if (!attribute && !attack) {
         return;
     }
-    ctx->skill_seals[target].push_back(BattleContext::SkillSeal{
-        source_id, count, attribute, attack, penetrable, /*armor_level=*/0,
+    auto& seals = ctx->skill_seals[target];
+    // 覆盖去重：同 effect_id 覆盖刷新（仿技能效果桶同 effect 覆盖）。
+    for (auto& s : seals) {
+        if (s.effect_id == effect_id) {
+            s.remaining = count;
+            s.remaining_rounds = duration_rounds;
+            s.seal_attribute = attribute;
+            s.seal_attack = attack;
+            s.penetrable = penetrable;
+            return;
+        }
+    }
+    seals.push_back(BattleContext::SkillSeal{
+        target, effect_id, count, duration_rounds, attribute, attack, penetrable, /*armor_level=*/0,
     });
 }
 

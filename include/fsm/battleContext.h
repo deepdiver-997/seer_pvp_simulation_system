@@ -84,12 +84,16 @@ public:
     // 类别抑制（damage_suppress_mask）按效果类别跳过被抑制方的伤害效果。
     DamagePipeline damage_pipeline_;
 
-    //--- 技能拦截桶（封属性/封攻击，次数类，跨回合）---
-    // 次数类拦截效果（如"对手下1次属性技能失效"）挂在这里，按被拦截方 owner 索引。
-    // 回合类拦截（被控/疲惫）走异常状态系统，自然减扣，不入此桶。
+    //--- 技能拦截桶（封属性/封攻击）---
+    // 拦截效果挂到**被拦截方**的桶里（施放方切换不影响它；被拦截方切换时
+    // invalidate_on_stage_effects 清自己桶 → 换宠可洗掉封属性）。
+    // 按被拦截方 owner 索引；每条显式带 target（不靠"在哪个桶"推断）。
+    // 次数型（remaining>0）命中消费；回合型（remaining_rounds>0）每回合递减、可被断回合。
     struct SkillSeal {
-        int source_id = -1;   // 谁放的（0/1）
-        int remaining = 0;    // 剩余拦截次数
+        int target = -1;          // 封锁对象（被拦截方），显式
+        int effect_id = -1;       // 来源效果 id：覆盖去重 key（同效果覆盖刷新）
+        int remaining = 0;        // 次数型剩余次数（>0 命中消费）
+        int remaining_rounds = 0; // 回合型剩余回合（>0 每回合递减；0=次数型）
         bool seal_attribute = false;  // 封锁属性技能（category=4）
         bool seal_attack = false;     // 封锁攻击技能（category=1/2）
         bool penetrable = true;   // 可否被"无视攻击免疫"穿透：false=条件盔/龙威，恒被挡
@@ -268,6 +272,7 @@ public:
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
+        skill_seals[owner].clear();  // 拦截挂在被拦截方桶：换宠洗掉自己身上的封属性
     }
 
     //--- 清空效果 ---
