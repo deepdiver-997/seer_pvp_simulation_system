@@ -122,6 +122,19 @@ public:
     void clear_usability_effects();
     Effect clone_effect(int effectId, EffectArgs args = {}) const;
     void add_effect_node(SkillExecResult result, SkillEffectNode node);
+    // 万相乖离"取消触发条件"：按解析顺序找 parsed_units_ 里第一条 condition != None 的
+    // 效果单元，置 condition=None（永久无条件），返回其下标；没有可取消的返回 -1。
+    // 执行器每次执行时从 args.extra 解引用 → 读到修改后的 condition，自然生效。
+    // 头内联：插件（soul_lib/moves_lib 不链接 sim_core）也要调用。
+    int cancel_next_parsed_condition() {
+        for (std::size_t i = 0; i < parsed_units_.size(); ++i) {
+            if (parsed_units_[i].condition != UnitCondition::None) {
+                parsed_units_[i].condition = UnitCondition::None;  // 永久取消：无条件触发
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
 
     //--- 三阶段生命周期 ---
     // 选择期（操作确认时）：技能能否被选中 → 立即注册先制等即时效果
