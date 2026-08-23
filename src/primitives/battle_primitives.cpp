@@ -232,13 +232,17 @@ void deal_damage(BattleContext* ctx, int target, int amount,
         pre_resist = effective;
     }
 
-    // 粉伤抗性层（固定/百分比伤害）：免疫粉伤 → 伤害抗性% → 减粉% 逐级削减（官方必修8/选修6）。
+    // 粉伤抗性层（固定/百分比伤害）：免疫粉伤 → 对应来源抗性% → 减粉% 逐级削减。
+    // 伤害抗性按来源分型：FIXED 走 fixed_resist_pct、PERCENT 走 percent_resist_pct（官方：暴击/固定/百分比）。
     // 被挡下（<=0）且粉转真 → 改以真实伤害结算（吃护盾、穿抗性/免疫）。TRUE 绕过此层。
     if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
+        const int resist_pct =
+            kind == DamageKind::FIXED ? ctx->fixed_resist_pct[target]
+                                      : ctx->percent_resist_pct[target];
         if (ctx->pink_immune[target]) {
             effective = 0;
         } else {
-            effective -= effective * ctx->pink_resist_pct[target] / 100;
+            effective -= effective * resist_pct / 100;
             effective -= effective * ctx->pink_reduce_pct[target] / 100;
         }
         if (effective <= 0) {

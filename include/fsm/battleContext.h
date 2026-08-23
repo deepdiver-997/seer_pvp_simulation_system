@@ -136,9 +136,12 @@ public:
     int elf_element_view_bound_slot[2]{-1, -1};  // 已绑定槽（-1=未基线）
 
     //--- 粉伤抗性（on-stage 作用域，切换/清场清）---
+    // 伤害抗性按来源分三种（官方：暴击/固定/百分比），逐型削减对应伤害。
     bool pink_immune[2]{};     // 免疫粉伤（固定/百分比伤害）
-    int  pink_resist_pct[2]{}; // 伤害抗性%（减固定/百分比伤害）
-    int  pink_reduce_pct[2]{}; // 减粉%（百分比免减）
+    int  fixed_resist_pct[2]{};   // 固定伤害抗性%
+    int  percent_resist_pct[2]{}; // 百分比伤害抗性%
+    int  crit_resist_pct[2]{};    // 暴击伤害抗性%（削减暴击加成部分）
+    int  pink_reduce_pct[2]{}; // 减粉%（百分比免减，固定+百分比通用）
     bool pink_to_true[2]{};    // 粉转真：被免疫/抗性/减粉挡下时改以真实伤害结算
 
     //--- 反弹/转化异常（on-stage 作用域）---
@@ -291,7 +294,9 @@ public:
         pp_reverse[owner] = false;
         skill_seals[owner].clear();  // 拦截挂在被拦截方桶：换宠洗掉自己身上的封属性
         pink_immune[owner] = false;          // 粉伤抗性不继承给新精灵
-        pink_resist_pct[owner] = 0;
+        fixed_resist_pct[owner] = 0;
+        percent_resist_pct[owner] = 0;
+        crit_resist_pct[owner] = 0;
         pink_reduce_pct[owner] = 0;
         pink_to_true[owner] = false;
         reflect_anomaly[owner] = false;      // 弹控不继承
@@ -315,7 +320,9 @@ public:
         pp_reverse[0] = false;
         pp_reverse[1] = false;
         pink_immune[0] = pink_immune[1] = false;
-        pink_resist_pct[0] = pink_resist_pct[1] = 0;
+        fixed_resist_pct[0] = fixed_resist_pct[1] = 0;
+        percent_resist_pct[0] = percent_resist_pct[1] = 0;
+        crit_resist_pct[0] = crit_resist_pct[1] = 0;
         pink_reduce_pct[0] = pink_reduce_pct[1] = 0;
         pink_to_true[0] = pink_to_true[1] = false;
         reflect_anomaly[0] = reflect_anomaly[1] = false;

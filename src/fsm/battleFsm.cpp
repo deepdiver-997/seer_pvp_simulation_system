@@ -248,6 +248,16 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
     // base 为原始伤害；减伤不再在此同步结算，改由 DamagePipeline 的 REDUCE 阶段施加
     // （install_default_damage_reduction 注册，可被 damage_suppress_mask 抑制）。
     snapshot.base = std::max(0, Calculation::calculateDamage(attacker_id, ctx->ws, skill));
+    // 暴击：roll 命中 → 按暴击倍率放大 base（在减伤管线之前）。暴击抗性削减"加成"部分
+    // （如 2 倍暴击 + 50% 暴击抗性 → 1.5 倍）。crit_rate 默认 0（官方 crit_rate 未接入）。
+    const float crit_rate = skill.critical_strike_rate * ctx->ws.crit_rate_mod[attacker_id];
+    if (crit_rate > 0.0f && (rand() % 1000) < static_cast<int>(crit_rate * 10.0f)) {
+        const int crit_mult = ctx->ws.cached_crit_damage[attacker_id];  // 默认 200（2 倍）
+        const int bonus = crit_mult - 100;
+        const int effective_bonus = bonus * (100 - ctx->crit_resist_pct[defender_id]) / 100;
+        snapshot.base = snapshot.base * (100 + effective_bonus) / 100;
+        snapshot.isCrit = true;
+    }
     snapshot.afterAdd = snapshot.base;
     snapshot.afterMul = snapshot.base;
     snapshot.final = snapshot.base;

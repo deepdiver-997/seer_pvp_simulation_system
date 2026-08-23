@@ -181,7 +181,7 @@ bool Skills::loadSkills() {
     priority = record->priority;
     maxPP = record->max_pp;
     pp = record->max_pp;
-    critical_strike_rate = 1.0f;
+    critical_strike_rate = 0.0f;  // 默认不暴击；效果/测试可改（官方 crit_rate 列未接入，后续可加载）
     element[0] = record->type_id;
     element[1] = 0;
     rawEffectRecords = record->effects;
