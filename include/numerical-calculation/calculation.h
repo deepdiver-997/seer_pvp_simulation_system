@@ -19,8 +19,16 @@ class Calculation {
         // 技能威力视图层：ws.skill_power_view（效果可改，如威力提升/随机威力）优先，
         // 未物化(0)回退技能静态 power。
         const int power = ws.skill_power_view[attacker] > 0 ? ws.skill_power_view[attacker] : skill.power;
-        damage = (0.84 * Attack / Defense * power + 2)
-                * calculateRestraintMultiples(ws.view_elementalAttributes[attacker], ws.view_elementalAttributes[defender])
+        // 技能元素/克制倍率视图层：
+        // - 克制按"技能元素视图" vs 防御方元素算（官方机制：克制 = 技能系别 vs 防御方系别，
+        //   非攻击方精灵系别——"以XX系别计算克制倍数"类效果改写 skill_element_view）。
+        // - restraint_view >= 0 时直接覆盖（"不会出现微弱"钳到1、固定倍率直写）。
+        // - 本系加成(involve) 仍用技能真实系别 skill.element（改系别只改克制、不改本系）。
+        const auto& elem_view = ws.skill_element_view[attacker];
+        const double restraint = ws.restraint_view[attacker] >= 0.0
+            ? ws.restraint_view[attacker]
+            : calculateRestraintMultiples(elem_view, ws.view_elementalAttributes[defender]);
+        damage = (0.84 * Attack / Defense * power + 2) * restraint
                 * (217 + rand() % 39) / 255;
         if(involve(ws.view_elementalAttributes[attacker], skill.element)) {
             damage *= 1.5; // Elemental advantage

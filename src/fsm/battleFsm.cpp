@@ -173,6 +173,9 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
     // 技能威力视图层：本次攻击的威力打底物化到 ws，效果（SKILL_EFFECT 时点）可改，
     // ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值（见 battleWorkspace.h）。
     ctx->ws.skill_power_view[robot_id] = skill.power;
+    // 技能元素视图层：克制计算用的系别打底物化 skill.element，效果可改（"以XX系别算克制"）。
+    ctx->ws.skill_element_view[robot_id][0] = skill.element[0];
+    ctx->ws.skill_element_view[robot_id][1] = skill.element[1];
     const auto [result, flags] = skill.execute(ctx, robot_id, trigger_state);
     write_skill_resolution(ctx, robot_id, result, flags);
 }

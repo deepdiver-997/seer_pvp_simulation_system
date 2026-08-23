@@ -103,6 +103,17 @@ struct BattleWorkspace {
     // 0 = 未物化（calculateDamage 回退 skill.power）。
     int skill_power_view[2];
 
+    //========== 技能元素/克制倍率视图层 ==========
+    // 攻击结算视角的技能系别：默认物化 skill.element，效果可改
+    // （"以XX系别计算克制倍数"类效果写这里）。克制倍率计算用它 vs 防御方元素；
+    // 本系加成(involve) 仍用技能真实系别 skill.element（改系别只改克制、不改本系）。
+    int skill_element_view[2][2];
+
+    // 克制倍率视图：>=0 直接用作本次攻击克制倍率（"不会出现微弱"钳到1、
+    // "不计算克制"设1、固定倍率直写）；<0 未设置 → 按 skill_element_view vs
+    // 防御方元素计算。reset 须显式恢复 -1.0（memset 会清成 0）。
+    double restraint_view[2];
+
     //========== 命中效果失效标记（③层，白板模式） ==========
     // execute 判定③层 kFullNull 时置位；ATTACK_DAMAGE 阶段据此把伤害归 0（白板）。
     // 每回合 reset 自动清；kEffectsOnly（保留伤害）不置位。
@@ -125,6 +136,7 @@ struct BattleWorkspace {
             skill_exec_result[i] = SkillExecResult::SKILL_INVALID;
             skill_resolution_flags[i] = SkillResolutionFlags{false, false};
             skill_pp_cost_multiplier[i] = 1;
+            restraint_view[i] = -1.0;  // 未设置 → 按元素计算
         }
     }
     int getTempAbilityValue(int owner, NumericalPropertyIndex i) const {

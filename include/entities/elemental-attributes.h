@@ -4,7 +4,7 @@
 #include <iostream>
 #include <memory>
 
-#include <db/db_service.h>
+// #include <db/db_service.h>
 
 //元素克制关系
 class ElementalAttributes {
