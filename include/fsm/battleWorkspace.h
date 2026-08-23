@@ -96,6 +96,10 @@ struct BattleWorkspace {
     };
     AttackCredential attack_credential[2];   // 按攻击方索引
 
+    // 本次攻击无视护盾/护罩响应（如无极圣武魂印"自身攻击无视护盾承伤效果"）。
+    // 效果在 ROUND_START/SKILL_EFFECT 置位；deal_damage 据此跳过对应银行的吸收。
+    bool ignore_shield[2]{};   // 按攻击方索引
+
     //========== 技能威力视图层 ==========
     // 本回合视角的技能威力：攻击时由 resolve_skill_execution 物化 skill.power，
     // 效果（如无相谛 179"属性相同威力提升"、未来黯玉咒言随机/累积威力）在

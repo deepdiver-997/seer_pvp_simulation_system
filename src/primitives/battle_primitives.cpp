@@ -206,8 +206,10 @@ BreakResult break_round_effects(BattleContext* ctx, int target) {
 // ----------------------------------------------------------------
 // deal_damage — 伤害原语（统一伤害入口）
 //
-// 流程：护盾吸收（按优先级）→ 扣血 → emit EVENT_TAKE_DAMAGE。
-// 护盾被击破时 emit EVENT_SHIELD_BROKEN（对应描述"护盾消失时XXX"）。
+// 流程：粉伤抗性（固定/百分比）→ 护盾/护罩吸收 → 扣血 → emit EVENT_TAKE_DAMAGE。
+// 护盾只响应红伤(NORMAL)、护罩只响应粉伤(FIXED/PERCENT)、真实伤害直通（官方护盾/护罩分离）。
+// 被击破时 emit EVENT_SHIELD_BROKEN（对应描述"护盾消失时XXX"，护罩破罩同事件）。
+// 攻击方可设 ws.ignore_shield 使本次攻击无视护盾/护罩响应。
 // 所有伤害类机制都应走这里，避免效果函数直接改 hp 绕过管线。
 // ----------------------------------------------------------------
 void deal_damage(BattleContext* ctx, int target, int amount,
@@ -234,7 +236,7 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 
     // 粉伤抗性层（固定/百分比伤害）：免疫粉伤 → 对应来源抗性% → 减粉% 逐级削减。
     // 伤害抗性按来源分型：FIXED 走 fixed_resist_pct、PERCENT 走 percent_resist_pct（官方：暴击/固定/百分比）。
-    // 被挡下（<=0）且粉转真 → 改以真实伤害结算（吃护盾、穿抗性/免疫）。TRUE 绕过此层。
+    // 被挡下（<=0）且粉转真 → 改以真实伤害结算（直通护盾/护罩、穿抗性/免疫）。TRUE 绕过此层。
     if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
         const int resist_pct =
             kind == DamageKind::FIXED ? ctx->fixed_resist_pct[target]
@@ -253,14 +255,24 @@ void deal_damage(BattleContext* ctx, int target, int amount,
         }
     }
 
-    // 护盾吸收（按优先级从高到低），记录破盾数
+    // 护盾/护罩吸收：护盾只响应红伤(NORMAL)，护罩只响应粉伤(FIXED/PERCENT)，真实伤害直通。
+    // 攻击方可设 ws.ignore_shield[attacker] 使本次攻击无视护盾/护罩响应（如无极圣武魂印）。
+    const bool ignore_bank = (actor >= 0 && actor <= 1 && ctx->ws.ignore_shield[actor]);
     int broken = 0;
-    const int remaining = pet.shield_bank_.absorb(effective, &broken);
+    int remaining = effective;
+    if (!ignore_bank) {
+        if (kind == DamageKind::NORMAL) {
+            remaining = pet.shield_bank_.absorb(effective, &broken);
+        } else if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
+            remaining = pet.hood_bank_.absorb(effective, &broken);
+        }
+        // DamageKind::TRUE：护盾/护罩均不响应，直通
+    }
     if (broken > 0) {
         ctx->event_center_.emit(BattleEvent{EventType::EVENT_SHIELD_BROKEN, actor, target});
     }
     if (remaining <= 0) {
-        return;  // 护盾完全挡下
+        return;  // 护盾/护罩完全挡下
     }
 
     // 扣血
