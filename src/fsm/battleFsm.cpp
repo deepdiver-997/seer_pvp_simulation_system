@@ -87,7 +87,9 @@ bool should_skip_action_flow(const BattleContext* ctx, int robot_id) {
         return true;
     }
     if (!is_skill_action(ctx, robot_id)) {
-        return true;
+        return true;  // CHOOSE_PET/USE_MEDICINE 在 OPERATION_CHOOSE_SKILL_MEDICAMENT
+                      // 收到时已同步应用（perform_switch + EVENT_SWAP / robot.use_medicine），
+                      // 此处主流程（BEFORE_SKILL_HIT → ... → AFTER_ACTION）无技能可执行，跳过。
     }
     if (ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]].hp <= 0) {
         return true;
@@ -853,11 +855,11 @@ void BattleFsm::handle_BattleFirstActionStart(BattleContext* battleContext) {
     battleContext->execute_registered_actions(first_mover_id, State::BATTLE_FIRST_ACTION_START);
     settle_staged_action_start_abnormal_damage(battleContext, first_mover_id);
     if (should_skip_action_flow(battleContext, first_mover_id)) {
-        // 主动切换：CHOOSE_PET（区别于被控跳过的 NONE/技能但被控）→ 在此执行换宠
-        if (battleContext->roundChoice[first_mover_id][0]
-            == static_cast<int>(BattleFsm::ActionType::CHOOSE_PET)) {
-            perform_switch(battleContext, first_mover_id, battleContext->roundChoice[first_mover_id][1]);
-        }
+        // 跳过主流程的原因：选了 CHOOSE_PET/USE_MEDICINE（操作结果在 OPERATION_CHOOSE_SKILL_MEDICAMENT
+        // 收到时已同步完成——CHOOSE_PET 的 perform_switch + EVENT_SWAP emit；USE_MEDICINE 的
+        // robot.use_medicine 都已在那一刻做完）/ 当前宠物已死 / 处于控制异常。
+        // 这里**不再**做 perform_switch：on_stage 早已是目标槽位（CHOOSE 时点已更新），
+        // 调用只会早返回。此处直接跳到 EXTRA_ACTION（先手方本回合无技能主流程）。
         log("Battle: First mover skips main action flow and jumps to extra-action/death timing.");
         battleContext->currentState = State::BATTLE_FIRST_EXTRA_ACTION;
         return;
@@ -962,11 +964,8 @@ void BattleFsm::handle_BattleSecondActionStart(BattleContext* battleContext) {
     battleContext->execute_registered_actions(second_mover_id, State::BATTLE_SECOND_ACTION_START);
     settle_staged_action_start_abnormal_damage(battleContext, second_mover_id);
     if (should_skip_action_flow(battleContext, second_mover_id)) {
-        // 主动切换：CHOOSE_PET（区别于被控跳过的 NONE/技能但被控）→ 在此执行换宠
-        if (battleContext->roundChoice[second_mover_id][0]
-            == static_cast<int>(BattleFsm::ActionType::CHOOSE_PET)) {
-            perform_switch(battleContext, second_mover_id, battleContext->roundChoice[second_mover_id][1]);
-        }
+        // 同 handle_BattleFirstActionStart：跳过主流程原因（CHOOSE_PET/USE_MEDICINE/死宠/控异常），
+        // 操作结果都在 OPERATION_CHOOSE_SKILL_MEDICAMENT 时点已同步完成。直接跳到 EXTRA_ACTION。
         log("Battle: Second mover skips main action flow and jumps to extra-action/death timing.");
         battleContext->currentState = State::BATTLE_SECOND_EXTRA_ACTION;
         return;
