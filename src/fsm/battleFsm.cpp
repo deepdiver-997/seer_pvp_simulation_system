@@ -225,9 +225,9 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     ctx->getPet(robot_id).soulMark.activate_soul_mark(ctx, robot_id);
     // ⑤ ws 同步新精灵数值（伤害/先手判定用）
     sync_workspace_from_on_stage(ctx);
-    // ⑥ 广播 EVENT_SWAP——对方魂印可据此触发"对方切换"类效果（如启灵元神 1581 神印挂层）。
-    //    actor=换宠方，target=对方。下个 drain 点统一派发，watcher 在桶迭代外安全运行。
-    ctx->event_center_.emit(BattleEvent{EventType::EVENT_SWAP, robot_id, 1 - robot_id, 0});
+    // 注：EVENT_SWAP 已在操作选择时点（handle_OperationChooseSkillMedicament
+    //     收到 CHOOSE_PET 时）emit，drain 在 CHOOSE 桶跑完后 → PROTECTION_1 跑前派发，
+    //     紧跟 PROTECTION_1 节点立即结算真伤。不再此处重复 emit。
 }
 
 void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
@@ -702,6 +702,13 @@ void BattleFsm::handle_OperationChooseSkillMedicament(BattleContext* battleConte
             }
         }
         battleContext->operation_collected[actor] = true;
+        // 操作选择时点广播中切事件：让 event_center 派发给"对方中切"类 watcher
+        // （如启灵元神 1581 神印）。drain 在 CHOOSE 桶跑完后、PROTECTION_1 跑前，
+        // 紧跟的 PROTECTION_1 节点可以直接读对手 soulmark_storage[1581].stacks 结算真伤。
+        if (static_cast<ActionType>(buf[1]) == ActionType::CHOOSE_PET) {
+            battleContext->event_center_.emit(
+                BattleEvent{EventType::EVENT_SWAP, actor, 1 - actor, 0});
+        }
     } else {
         battleContext->control_block_->async_write(
             battleContext->current_player_id_,
