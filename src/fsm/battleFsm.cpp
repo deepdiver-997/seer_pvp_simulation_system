@@ -213,7 +213,7 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
         return;
     }
     if (ctx->on_stage[robot_id] == target_slot) {
-        return;  // 切到同一只，无事发生
+        return;  // 切到同一只，无事发生（主动切换在操作选择时点已做完；这里只是 no-op 兜底）
     }
     // ① 清旧宠公共状态：ON_STAGE 效果 + 穿透授予 + 命中失效 + 魂印信号 + 拦截桶
     ctx->invalidate_on_stage_effects(robot_id);
@@ -225,9 +225,11 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     ctx->getPet(robot_id).soulMark.activate_soul_mark(ctx, robot_id);
     // ⑤ ws 同步新精灵数值（伤害/先手判定用）
     sync_workspace_from_on_stage(ctx);
-    // 注：EVENT_SWAP 已在操作选择时点（handle_OperationChooseSkillMedicament
-    //     收到 CHOOSE_PET 时）emit，drain 在 CHOOSE 桶跑完后 → PROTECTION_1 跑前派发，
-    //     紧跟 PROTECTION_1 节点立即结算真伤。不再此处重复 emit。
+    // 主动切换场景：EVENT_SWAP 已在 handle_OperationChooseSkillMedicament 收到
+    // CHOOSE_PET 时 emit（perform_switch 也在那里同步完成，让 drain 时 watch_callback
+    // 看到的是新精灵）。死亡换宠（handle_ChooseAfterDeath）路径下 perform_switch 是
+    // 在 m_buffer 提交后立即调用——目前没有 emit EVENT_SWAP，因为死亡换宠语义上是
+    // 强制替换，不是对方主动切换。如未来需要"对方看到我方死亡换宠"的事件再补 emit。
 }
 
 void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
@@ -702,12 +704,22 @@ void BattleFsm::handle_OperationChooseSkillMedicament(BattleContext* battleConte
             }
         }
         battleContext->operation_collected[actor] = true;
-        // 操作选择时点广播中切事件：让 event_center 派发给"对方中切"类 watcher
-        // （如启灵元神 1581 神印）。drain 在 CHOOSE 桶跑完后、PROTECTION_1 跑前，
-        // 紧跟的 PROTECTION_1 节点可以直接读对手 soulmark_storage[1581].stacks 结算真伤。
+        // 操作选择时点同步完成"主动切换"操作结果：on_stage 更新 + 旧宠公共状态清
+        // （invalidate/clear_abnormal）+ 新宠魂印激活 + ws 同步——全部在收到 CHOOSE_PET
+        // 那一刻完成，让随后 emit 的 EVENT_SWAP 在 drain 时 watch_callback 看到的 getPet(actor)
+        // 是新精灵（不是切换出去的旧精灵）。BATTLE_FIRST/SECOND_ACTION_START 里的 perform_switch
+        // 会因 on_stage==target_slot 早返回变 no-op，不会重复执行清理。
         if (static_cast<ActionType>(buf[1]) == ActionType::CHOOSE_PET) {
-            battleContext->event_center_.emit(
-                BattleEvent{EventType::EVENT_SWAP, actor, 1 - actor, 0});
+            // 只在"实际切到不同槽位"时 emit+执行 perform_switch：切到同一只精灵时不应触发
+            // EVENT_SWAP（不算"中切"，watcher 不应响应），也不应重复清状态。
+            if (battleContext->on_stage[actor] != buf[2]) {
+                perform_switch(battleContext, actor, buf[2]);
+                // 操作选择时点广播中切事件：让 event_center 派发给"对方中切"类 watcher
+                // （如启灵元神 1581 神印）。drain 在 CHOOSE 桶跑完后、PROTECTION_1 跑前派发，
+                // 紧跟的 PROTECTION_1 节点可以直接读对方 soulmark_storage[1581].stacks 结算真伤。
+                battleContext->event_center_.emit(
+                    BattleEvent{EventType::EVENT_SWAP, actor, 1 - actor, 0});
+            }
         }
     } else {
         battleContext->control_block_->async_write(
