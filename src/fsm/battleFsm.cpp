@@ -225,6 +225,9 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     ctx->getPet(robot_id).soulMark.activate_soul_mark(ctx, robot_id);
     // ⑤ ws 同步新精灵数值（伤害/先手判定用）
     sync_workspace_from_on_stage(ctx);
+    // ⑥ 广播 EVENT_SWAP——对方魂印可据此触发"对方切换"类效果（如启灵元神 1581 神印挂层）。
+    //    actor=换宠方，target=对方。下个 drain 点统一派发，watcher 在桶迭代外安全运行。
+    ctx->event_center_.emit(BattleEvent{EventType::EVENT_SWAP, robot_id, 1 - robot_id, 0});
 }
 
 void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
