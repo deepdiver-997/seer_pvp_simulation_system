@@ -89,7 +89,10 @@ public:
     // invalidate_on_stage_effects 清自己桶 → 换宠可洗掉封属性）。
     // 按被拦截方 owner 索引；每条显式带 target（不靠"在哪个桶"推断）。
     // 次数型（remaining>0）命中消费；回合型（remaining_rounds>0）每回合递减、可被断回合。
-    // 加一个免断回合的属性，然后断回合原语需要查询对面有没有免断决定返回结果
+    // 加一个免断回合的属性，然后断回合原语需要查询对面有没有免断决定返回结果 然后你说这个要不要也做成一个容器，因为seals都是被动的而且消耗最大化，就像我说的
+    // 身上有次数龙威和封属回合类效果，对手使用属性技能，龙威一样会被响应然后消耗，做成一个容器就不用自己写触发同类型的了，所有可以响应的都会消耗
+    // 而且这个做出来可能还可以给次数免疫实现使用：次数免疫是一种次数类效果不会过期，但是次免也分为可传承和不可传承的两种，不可传承的在自己切换时就会被清除，反之则不会。
+    // 不过次免到底会不会在有回合类免疫的情况下消耗你需要去reference/ 找一下相关文章说明了
     struct SkillSeal {
         int target = -1;          // 封锁对象（被拦截方），显式
         int effect_id = -1;       // 来源效果 id：覆盖去重 key（同效果覆盖刷新）
@@ -99,8 +102,10 @@ public:
         bool seal_attack = false;     // 封锁攻击技能（category=1/2）
         bool penetrable = true;   // 可否被"无视攻击免疫"穿透：false=条件盔/龙威，恒被挡
         int  armor_level = 0;     // 盔等级：0=可穿盔, 1=条件盔, 2=龙威（本轮只存不比较）
+        // 后期要不要也做成位图避免枚举膨胀？
     };
     std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
+    // 拦截桶确实不能和之前做的timed_bucket混用，因为这个是要别人来查询的，自己不会主动执行到期对象
 
     //--- 命中效果失效桶（③层：命中但效果不注册；白板=伤害归0/保留伤害=伤害照常）---
     // 挂在防御方上：其技能命中时命中效果被失效。mode 见 effect.h HitInvalidMode。
@@ -127,7 +132,7 @@ public:
     //--- 魂印条件凭证信号（SET 端：魂印激活时设置，切换/清场清零）---
     bool force_execute_on_pp0[2]{};  // 魂印激活：使用 PP=0 技能时必定命中+强制执行（无为觉者 2260）
     bool ignore_pp[2]{};             // 魂印激活：PP=0 技能仍可选（不受PP限制）
-    bool pp_reverse[2]{};            // 魂印激活：使用技能后 PP 反转（当前PP与已损失互换，无为觉者 2260）
+    bool pp_reverse[2]{};            // 魂印激活：使用技能后 PP 反转（当前PP与已损失互换，无为觉者 2260）这个我在想要不要从context移除因为无为觉者完全可以注册一个监控在双方技能使用完之后检测自己刚刚是否成功出手，是的话就直接去pet槽改pp值
 
     //--- 精灵系别半持久化视图（当前在场精灵有效系别）---
     // 改系别效果（属性反转/龙琰类）写这里，跨回合保留（ws 每回合 reset 会清，故放 context）。
@@ -137,6 +142,8 @@ public:
     int elf_element_view_bound_slot[2]{-1, -1};  // 已绑定槽（-1=未基线）
 
     //--- 粉伤抗性（on-stage 作用域，切换/清场清）---
+    // 这个抗性我觉得放在pet里最好，然后workspace也要有一套用于计算视图，因为像混元天尊的特性，其死亡给予的三回合buff可以让己方精灵的两个粉伤抗性被视为100%
+    // 但是3回合一过又会恢复，所以计算粉伤也要走ws，最后就是一个小点，如果精灵本身粉伤抗性等于0即没有开启，那么这个buff就不会改变，因为它只能提升非0到100%
     // 伤害抗性按来源分三种（官方：暴击/固定/百分比），逐型削减对应伤害。
     bool pink_immune[2]{};     // 免疫粉伤（固定/百分比伤害）
     int  fixed_resist_pct[2]{};   // 固定伤害抗性%
@@ -169,11 +176,9 @@ public:
     // 条目为 TEAM 作用域（随魂印存活，不随上下场作废）；宿主阵亡后查找失败即自然失效。
     TimedBucket updater_effects;
 
-    //--- 被动效果表 ---
-    std::array<std::map<int, ContinuousEffect*>, 2> passiveEffects;
 
     //--- 待注册效果 / 未来触发表 ---
-    std::unordered_map<State, std::array<std::vector<std::unique_ptr<PendingEffect>>, 2>> pending_effects;
+    std::unordered_map<State, std::array<std::vector<std::unique_ptr<PendingEffect>>, 2>> pending_effects;// 这个可以用TimedBucket替代吗？本质上是不可被断回合的回合类效果，或者说是触发器？可不可以用事件中心替代？会不会和事件中心共享一个过期版本号不好？
 
     //--- 网络缓冲 ---
     std::vector<char> m_buffer;
@@ -242,7 +247,6 @@ public:
     void registerEffect(State trigger, int owner, std::unique_ptr<ContinuousEffect> effect,
                         EffectContainer container = EffectContainer::Skill);
     void registerPendingEffect(State observeState, int owner, std::unique_ptr<PendingEffect> effect);
-    void registerPassiveEffect(int owner, int effectId, ContinuousEffect* effect);
 
     //--- 效果执行 ---
     void execute_pending_effects(int robotId, State state);

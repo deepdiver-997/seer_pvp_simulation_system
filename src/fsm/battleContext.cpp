@@ -312,10 +312,6 @@ bool BattleContext::has_active_abnormal_status(int robotId, int statusId) const 
     return roundCount < abnormal_status_end_round[robotId][statusId];
 }
 
-void BattleContext::registerPassiveEffect(int owner, int effectId, ContinuousEffect* effect) {
-    passiveEffects[owner][effectId] = effect;
-}
-
 void BattleContext::execute_pending_effects(int robotId, State state) {
     if (robotId == -1) {
         execute_pending_effects(0, state);
@@ -857,24 +853,6 @@ std::string BattleContext::getFullStateJson() const {
     append_effect_table(oss, soul_mark_effects);
     oss << ",\"pendingEffects\":";
     append_pending_table(oss, pending_effects);
-    oss << ",\"passiveEffects\":{";
-    {
-        bool first_player = true;
-        for (int p = 0; p < 2; ++p) {
-            if (passiveEffects[p].empty()) continue;
-            if (!first_player) oss << ",";
-            first_player = false;
-            oss << "\"player" << p << "\":[";
-            bool first_pe = true;
-            for (const auto& [effId, eff] : passiveEffects[p]) {
-                if (!first_pe) oss << ",";
-                first_pe = false;
-                oss << "{\"effectId\":" << effId << ",\"isExpired\":" << (eff->isExpired(roundCount) ? "true" : "false") << "}";
-            }
-            oss << "]";
-        }
-    }
-    oss << "},";
 
     // Operation log
     oss << "\"operationLog\":\"" << json_escape(operation_log_) << "\",";
