@@ -17,6 +17,7 @@
 #include <fsm/battleWorkspace.h>
 #include <effects/continuousEffect.h>
 #include <effects/pendingEffect.h>
+#include <effects/timed_bucket.h>
 #include <effects/event_center.h>
 #include <effects/immunity_center.h>
 #include <effects/damage_pipeline.h>
@@ -54,9 +55,8 @@ public:
     std::array<std::array<int, kOfficialAbnormalStatusSlotCount>, 2> abnormal_status_end_round{};
 
     //--- 回合类效果计数（O(1) 查询”是否有回合类效果”）---
-    // 每次 registerEffect 时如果 isRoundEffect()==true 则 +1
-    // cleanup_expired_effects / remove_all_round_effects 时扣减
-    int active_round_effects[2]{};
+    // 计数已下沉到各 TimedBucket 内部（与桶内容一处维护，不会不同步）。
+    // 这里只做两桶求和，语义等同重构前的单一计数。
 
     //--- 回合效果版本号（epoch，用于 O(1) 断回合）---
     // 注册回合效果时 effect.valid_id_ = round_effect_valid_id[owner]
@@ -150,12 +150,13 @@ public:
     std::array<std::map<int, int>, 2> anomaly_conversion;  // [目标] 入异常 id → 出异常 id（单跳转换）
 
     //--- 技能效果执行表 ---
-    // 内层用 std::map<uint64_t, ...>：key = (source_id << 32) | effect_id，
-    // 同源同 effect 新注册自动覆盖旧（同源去重）；source_id==0 用唯一自增 key 不参与去重。
-    std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>> skills_effects;
+    // TimedBucket 封装：注册/同源去重/时点执行/过期清理/epoch 作废/回合计数（见 effects/timed_bucket.h）。
+    // 内层 key = (source_id << 32) | effect_id，同源同 effect 新注册自动覆盖旧。
+    TimedBucket skills_effects;
 
     //--- 魂印效果执行表 ---
-    std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>> soul_mark_effects;
+    // 与技能桶同类容器；执行顺序上魂印先于技能（execute_registered_actions）。
+    TimedBucket soul_mark_effects;
 
     //--- 被动效果表 ---
     std::array<std::map<int, ContinuousEffect*>, 2> passiveEffects;
@@ -278,6 +279,25 @@ public:
         }
     }
 
+    //--- 效果注册（插件内联入口）---
+    // 插件动态库（moves_lib / soul_lib）不链接 sim_core，只能调头文件内联方法。
+    // 这两个入口是插件注册效果的唯一途径——valid_id 绑定、同源去重、回合计数回滚
+    // 都由 TimedBucket::register_effect 内部完成。
+    // （此前插件是自己手抄这套逻辑：见 resources/moves_lib/lib_1.cpp effect_skill_843 的历史版本。）
+    void register_skill_effect(State trigger, int owner, std::unique_ptr<ContinuousEffect> effect) {
+        if (owner < 0 || owner > 1) {
+            return;
+        }
+        skills_effects.register_effect(trigger, owner, std::move(effect), round_effect_valid_id[owner]);
+    }
+
+    void register_soulmark_effect(State trigger, int owner, std::unique_ptr<ContinuousEffect> effect) {
+        if (owner < 0 || owner > 1) {
+            return;
+        }
+        soul_mark_effects.register_effect(trigger, owner, std::move(effect), round_effect_valid_id[owner]);
+    }
+
     //--- 切换/清场 ---
     // 使某方所有 ON_STAGE 效果惰性失效（切换精灵/清场用）。
     // 通过递增版本号实现：旧 ON_STAGE 效果 valid_id_ 不匹配 → 执行时跳过 + cleanup 移除。
@@ -287,7 +307,9 @@ public:
     void invalidate_on_stage_effects(int owner) {
         ++round_effect_valid_id[owner];
         ++watcher_valid_id[owner];
-        active_round_effects[owner] = 0;  // ON_STAGE 回合效果已全部失效，清计数器
+        // ON_STAGE 回合效果已全部失效，清各桶计数器（epoch 递增后它们都会被 cleanup 移除）
+        skills_effects.reset_round_count(owner);
+        soul_mark_effects.reset_round_count(owner);
         penetration_grants[owner].clear();  // 次数型穿透授予不继承给新精灵
         hit_effect_invalids[owner].clear();  // 命中效果失效（③层）不继承给新精灵
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
@@ -337,8 +359,6 @@ public:
                 pet.soulmark_storage.clear();  // 魂印持久槽：战斗结束/清场清空
             }
         }
-        active_round_effects[0] = 0;
-        active_round_effects[1] = 0;
         event_center_.clear_all();
         immunity_center_.clear_all();
         damage_pipeline_.clear();
@@ -351,8 +371,8 @@ public:
      * 清理所有已过期的回合类效果
      *
      * 在 BATTLE_ROUND_REDUCTION_ALL_ROUND_MINUS 统一调用，
-     * 遍历所有效果桶，移除 isExpired() == true 的效果。
-     * 同时更新 active_round_effects 计数器。
+     * 遍历两个时点桶，移除 isExpired() == true 或被 epoch 作废的效果。
+     * 各桶内部同时更新自己的回合计数。
      */
     void cleanup_expired_effects();
 
@@ -363,8 +383,17 @@ public:
      * 免疫检查、结果判定、EVENT_BREAK 事件由原语 break_round_effects
      * （include/primitives/battle_primitives.h）负责。
      * 注意：Mark ID 0（异常免疫标记）不受断回合影响，它不在效果桶中。
+     *
+     * 内联实现：插件动态库不链接 sim_core，需头文件可见（仿 843 / grant_penetration 先例）。
      */
-    void invalidate_all_round_effects(int robotId);
+    void invalidate_all_round_effects(int robotId) {
+        if (robotId < 0 || robotId > 1) {
+            return;
+        }
+        ++round_effect_valid_id[robotId];
+        skills_effects.reset_round_count(robotId);
+        soul_mark_effects.reset_round_count(robotId);
+    }
 
     /**
      * 注册被断回合补偿回调 —— 事件通道兼容层
@@ -445,7 +474,12 @@ public:
      * O(1) 查询目标是否还有回合类效果
      */
     bool has_round_effects(int robotId) const {
-        return robotId >= 0 && robotId <= 1 && active_round_effects[robotId] > 0;
+        if (robotId < 0 || robotId > 1) {
+            return false;
+        }
+        // 两个桶各自维护自己的回合计数，此处求和（等价于重构前的单一 active_round_effects）
+        return skills_effects.active_round_count(robotId) > 0
+            || soul_mark_effects.active_round_count(robotId) > 0;
     }
 
     //--- 日志 ---

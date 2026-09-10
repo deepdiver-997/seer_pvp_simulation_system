@@ -6,20 +6,7 @@
 
 namespace {
 
-using EffectBucket = std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>>;
 using PendingBucket = std::unordered_map<State, std::array<std::vector<std::unique_ptr<PendingEffect>>, 2>>;
-
-// 效果桶 key：同源去重用 (source_id << 32) | effect_id；
-// source_id==0（无来源）用全局自增唯一 key，不参与去重。
-uint64_t effect_key(const ContinuousEffect& effect) {
-    if (effect.source_id_ > 0) {
-        const int eid = effect.getEffectId();
-        const uint64_t lo = static_cast<uint32_t>(eid > 0 ? eid : 0);
-        return (static_cast<uint64_t>(effect.source_id_) << 32) | lo;
-    }
-    static uint64_t counter = 1;
-    return counter++;
-}
 
 constexpr std::array<State, 40> kLinearStateOrder = {
     State::GAME_START,
@@ -72,42 +59,15 @@ std::size_t find_state_index(State state) {
     return static_cast<std::size_t>(std::distance(kLinearStateOrder.begin(), it));
 }
 
-EffectBucket& bucket_for(BattleContext* ctx, EffectContainer container) {
+TimedBucket& bucket_for(BattleContext* ctx, EffectContainer container) {
     return (container == EffectContainer::SoulMark) ? ctx->soul_mark_effects : ctx->skills_effects;
 }
 
-const EffectBucket& bucket_for(const BattleContext* ctx, EffectContainer container) {
+const TimedBucket& bucket_for(const BattleContext* ctx, EffectContainer container) {
     return (container == EffectContainer::SoulMark) ? ctx->soul_mark_effects : ctx->skills_effects;
 }
 
-void execute_bucket_actions(EffectBucket& bucket, int robotId, State state, int roundCount, BattleContext* ctx) {
-    auto state_it = bucket.find(state);
-    if (state_it == bucket.end()) {
-        return;
-    }
-
-    auto& robotEffects = state_it->second[robotId];
-    std::vector<uint64_t> once_keys;  // 回合限一次：本趟执行后移除
-    for (auto& [key, effect] : robotEffects) {
-        // ON_STAGE 效果：检查是否被断回合/切换作废（valid_id 版本号不匹配）
-        // TEAM 效果不检查版本号 → 切换/清回合类不失效
-        if (effect->scope_ == EffectScope::ON_STAGE
-            && effect->valid_id_ != ctx->round_effect_valid_id[robotId]) {
-            continue;  // 已被作废，跳过执行，等待统一清理
-        }
-        if (!effect->isExpired(roundCount)) {
-            (*effect)(ctx);
-            if (effect->once_) {
-                once_keys.push_back(key);
-            }
-        }
-    }
-    // 回合限一次：移除本趟执行过的 once 效果（map 迭代时不可 erase，故收集后统一删）。
-    for (uint64_t key : once_keys) {
-        robotEffects.erase(key);
-    }
-    // 不在此处删除过期/被断效果 — 统一在 cleanup_expired_effects() 处理
-}
+// 时点桶的执行逻辑已移入 TimedBucket::execute_at（src/effects/timed_bucket.cpp）。
 
 void execute_pending_bucket_actions(PendingBucket& bucket, int robotId, State state, int roundCount, BattleContext* ctx) {
     auto state_it = bucket.find(state);
@@ -259,23 +219,9 @@ void BattleContext::back_to_last_state() {
 
 void BattleContext::registerEffect(State trigger, int owner, std::unique_ptr<ContinuousEffect> effect,
                                    EffectContainer container) {
-    if (effect->isRoundEffect()) {
-        ++active_round_effects[owner];
-    }
-    // 所有效果绑 valid_id_（不仅回合类）：切换精灵时次数类 ON_STAGE 效果也能惰性作废
-    effect->valid_id_ = round_effect_valid_id[owner];
-
-    auto& map = bucket_for(this, container)[trigger][owner];
-    const uint64_t key = effect_key(*effect);
-    // 同源去重：map 内已有同 key 旧效果 → 覆盖。旧效果若为回合类，扣回计数器。
-    auto it = map.find(key);
-    if (it != map.end() && it->second->isRoundEffect()) {
-        --active_round_effects[owner];
-        if (active_round_effects[owner] < 0) {
-            active_round_effects[owner] = 0;
-        }
-    }
-    map[key] = std::move(effect);
+    // valid_id 绑定 / 同源去重 / 回合计数回滚都在 TimedBucket::register_effect 内完成。
+    bucket_for(this, container).register_effect(trigger, owner, std::move(effect),
+                                                round_effect_valid_id[owner]);
 }
 
 void BattleContext::registerPendingEffect(State observeState, int owner, std::unique_ptr<PendingEffect> effect) {
@@ -295,50 +241,12 @@ void BattleContext::clear_all_on_stage_abnormal_statuses() {
 }
 
 void BattleContext::cleanup_expired_effects() {
-    // 清理一个效果桶中：
+    // 清理每个时点桶中：
     //   1. 自然过期的效果（isExpired）
-    //   2. 被断回合失效的效果（valid_id 不匹配）
-    // 同时扣减 active_round_effects 计数。
-    auto cleanup_bucket = [this](EffectBucket& bucket) {
-        for (auto& [state, per_player] : bucket) {
-            for (int p = 0; p < 2; ++p) {
-                auto& effects = per_player[p];
-                if (effects.empty()) continue;
-
-                int removed_round = 0;
-                for (const auto& [key, e] : effects) {
-                    (void)key;
-                    if (!e->isRoundEffect()) continue;
-                    if (e->isExpired(roundCount)
-                        || (e->scope_ == EffectScope::ON_STAGE
-                            && e->valid_id_ != round_effect_valid_id[p])) {
-                        ++removed_round;
-                    }
-                }
-
-                // 清理：
-                // - 回合类：过期 或（ON_STAGE 且被作废）
-                // - 非回合 ON_STAGE：被作废（切换后次数类效果也要移除）
-                std::erase_if(effects,
-                              [this, p](const auto& kv) {
-                                  const auto& e = kv.second;
-                                  if (e->isRoundEffect()) {
-                                      return e->isExpired(roundCount)
-                                          || (e->scope_ == EffectScope::ON_STAGE
-                                              && e->valid_id_ != round_effect_valid_id[p]);
-                                  }
-                                  return e->scope_ == EffectScope::ON_STAGE
-                                      && e->valid_id_ != round_effect_valid_id[p];
-                              });
-
-                active_round_effects[p] -= removed_round;
-                if (active_round_effects[p] < 0) active_round_effects[p] = 0;
-            }
-        }
-    };
-
-    cleanup_bucket(skills_effects);
-    cleanup_bucket(soul_mark_effects);
+    //   2. 被断回合/切换作废的效果（valid_id 不匹配）
+    // 同时扣减各自的回合计数。判定谓词只在 TimedBucket::cleanup 内写一次。
+    skills_effects.cleanup(roundCount, round_effect_valid_id);
+    soul_mark_effects.cleanup(roundCount, round_effect_valid_id);
 
     // 清理过期的断回合补偿 watcher（事件中心统一管理生命周期）
     // 传 watcher_valid_id 供 cleanup 检查 ON_STAGE 监听器是否被切换作废
@@ -348,14 +256,7 @@ void BattleContext::cleanup_expired_effects() {
     immunity_center_.cleanup(roundCount);
 }
 
-void BattleContext::invalidate_all_round_effects(int robotId) {
-    if (robotId < 0 || robotId > 1) return;
-
-    // O(1) 无效化：递增版本号 + 计数器归零。
-    // 免疫检查 / 结果判定 / EVENT_BREAK 事件由原语 break_round_effects 负责。
-    ++round_effect_valid_id[robotId];
-    active_round_effects[robotId] = 0;
-}
+// invalidate_all_round_effects 已内联至头文件（插件需可见）。
 
 int BattleContext::register_break_callback(int owner, int duration_rounds,
                                            std::function<void(BattleContext*)> fn) {
@@ -436,19 +337,14 @@ void BattleContext::execute_registered_actions(int robotId, State state) {
     execute_pending_effects(robotId, state);
 
     // 魂印容器优先于技能容器执行。
-    execute_bucket_actions(soul_mark_effects, robotId, state, roundCount, this);
-    execute_bucket_actions(skills_effects, robotId, state, roundCount, this);
+    soul_mark_effects.execute_at(state, robotId, this);
+    skills_effects.execute_at(state, robotId, this);
 }
 
 template<int EffectId>
 bool BattleContext::hasEffect(State trigger, int owner) const {
     const auto has_in_bucket = [&](EffectContainer container) {
-        const auto& bucket = bucket_for(this, container);
-        auto it = bucket.find(trigger);
-        if (it == bucket.end()) {
-            return false;
-        }
-        for (const auto& [key, effect] : it->second.at(owner)) {
+        for (const auto& [key, effect] : bucket_for(this, container).at(trigger, owner)) {
             (void)key;
             if (effect->getEffectId() == EffectId && !effect->isExpired(roundCount)) {
                 return true;
@@ -469,10 +365,7 @@ bool BattleContext::hasEffect(State trigger, int owner) const {
 template<int EffectId>
 bool BattleContext::consumeEffect(State trigger, int opponent) {
     // 默认仅消费技能容器，避免技能侧误删魂印侧效果。
-    auto& bucket = bucket_for(this, EffectContainer::Skill);
-    auto it = bucket.find(trigger);
-    if (it == bucket.end()) return false;
-    auto& oppEffects = it->second[opponent];
+    auto& oppEffects = bucket_for(this, EffectContainer::Skill).at(trigger, opponent);
     for (auto& [key, effect] : oppEffects) {
         (void)key;
         if (effect->getEffectId() == EffectId && !effect->isExpired(roundCount)) {
@@ -905,11 +798,10 @@ std::string BattleContext::getFullStateJson() const {
     oss << "},";
 
     // Effects tables
-    auto append_effect_table = [&](std::ostringstream& oss,
-                                    const std::unordered_map<State, std::array<std::map<uint64_t, std::unique_ptr<ContinuousEffect>>, 2>>& bucket) {
+    auto append_effect_table = [&](std::ostringstream& oss, const TimedBucket& bucket) {
         oss << "{";
         bool first_state = true;
-        for (const auto& [state, per_player] : bucket) {
+        for (const auto& [state, per_player] : bucket.all()) {
             for (int p = 0; p < 2; ++p) {
                 if (per_player[p].empty()) continue;
                 if (!first_state) oss << ",";

@@ -48,7 +48,7 @@ public:
 
     virtual ~ContinuousEffect() = default;
 
-    // 内联：执行内部 Effect 模板函数。isExpired 由调用方（execute_bucket_actions）先查，
+    // 内联：执行内部 Effect 模板函数。isExpired 由调用方（TimedBucket::execute_at）先查，
     // 这里不再重复检查（避免头文件访问 ctx->roundCount 需要完整 BattleContext 类型）。
     virtual bool operator()(BattleContext* ctx) {
         if (!effect_.logic) {
@@ -83,7 +83,7 @@ public:
     int source_id_ = 0;
     // 作用域：ON_STAGE（切换作废）/ TEAM（切换保留，不可被清回合类作废）
     EffectScope scope_ = EffectScope::ON_STAGE;
-    // 回合限一次：执行一次后由 execute_bucket_actions 移除（下回合重注册重新生效）。
+    // 回合限一次：执行一次后由 TimedBucket::execute_at 移除（下回合重注册重新生效）。
     bool once_ = false;
     // 效果类别（GENERIC / ROUND / SKILL_EXEC）
     EffectKind kind_ = EffectKind::GENERIC;

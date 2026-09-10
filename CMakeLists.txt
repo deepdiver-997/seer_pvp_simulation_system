@@ -26,6 +26,7 @@ set(SIM_CORE_SOURCES
     src/effects/effect_unit.cpp
     src/effects/effect_unit_parser.cpp
     src/effects/pendingEffect.cpp
+    src/effects/timed_bucket.cpp
     src/effects/damage_pipeline.cpp
     src/entities/pet_factory.cpp
     src/entities/numerical-properties.cpp
