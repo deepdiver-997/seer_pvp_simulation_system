@@ -234,6 +234,20 @@ const std::vector<SoulMarkNodeRef>* SoulMarkManager::getSoulMarkProgram(int soul
     return &it->second;
 }
 
+void SoulMarkManager::registerSoulMarkHooks(int soulmark_id, const SoulMarkHooks& hooks) {
+    std::unique_lock<std::shared_mutex> write_lock(cache_mutex_);
+    hooks_cache_[soulmark_id] = hooks;
+}
+
+const SoulMarkHooks* SoulMarkManager::getSoulMarkHooks(int soulmarkId) const {
+    std::shared_lock<std::shared_mutex> read_lock(cache_mutex_);
+    auto it = hooks_cache_.find(soulmarkId);
+    if (it == hooks_cache_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
 void SoulMarkManager::registerSkillEffect(int effect_id, EffectFn effect_fn) {
     // SoulMarkManager only handles soul marks, not skill effects
     // This is a no-op for soul mark manager
@@ -273,36 +287,103 @@ EffectArgs bind_soulmark_args(const EffectArgs& args, int owner) {
     }
     return EffectArgs(std::move(merged));
 }
+
+// 更新器效果：回合首时点（更新器桶）刷新某个魂印的节点注册。
+// args[0]=owner, args[1]=魂印 id。宿主通过 find_pet_with_soulmark 定位
+// （每方同魂印唯一，见 docs/02-效果系统/魂印机制设计与精灵表现档案.md §1）。
+// 宿主已阵亡/不存在 → 直接返回（该魂印不再提供效果）。
+EffectResult soulmark_updater_refresh(BattleContext* ctx, const EffectArgs& args) {
+    if (!ctx || !args.int_args || args.int_count < 2) {
+        return EffectResult::kOk;
+    }
+    const int owner = args.int_args[0];
+    const int mark_id = args.int_args[1];
+    if (owner < 0 || owner > 1 || mark_id <= 0) {
+        return EffectResult::kOk;
+    }
+    const int slot = ctx->find_pet_with_soulmark(owner, mark_id);
+    if (slot < 0) {
+        return EffectResult::kOk;  // 宿主阵亡 → 停止刷新
+    }
+    ElfPet& host = ctx->seerRobot[owner].elfPets[slot];
+    host.soulMark.register_soul_effect(ctx, owner, /*owner_on_stage=*/slot == ctx->on_stage[owner]);
+    return EffectResult::kOk;
+}
 } // namespace
 
-// SoulMark::activate_soul_mark — 战斗开始激活（OPERATION_ENTER_EXIT_STAGE，早于首轮技能选择）。
-// ① 注册全部节点到各自时点桶（round-1 各时点即就绪）；
+// SoulMark::register_updater — 在更新器桶登记"每回合刷新本魂印节点"的对象。
+// 只在程序链路登记（单效果链路无 once 节点，不需要刷新）。
+// 条目挂在 State::BATTLE_ROUND_COMPLETION 这个 key 下，由 FSM 在回合边界执行整个桶。
+void SoulMark::register_updater(BattleContext* context, int owner) {
+    if (!context || owner < 0 || owner > 1 || !has_program_) {
+        return;
+    }
+    Effect wrapper(id, 0, owner, /*left_round=*/-1,
+                   EffectArgs(std::vector<int>{owner, id}), &soulmark_updater_refresh);
+    auto ce = std::make_unique<ContinuousEffect>(
+        wrapper, State::BATTLE_ROUND_COMPLETION, owner, /*duration=*/-1, context->roundCount
+    );
+    ce->source_id_ = id;   // 同源去重：同魂印重复登记只保留一份
+    ce->scope_ = EffectScope::TEAM;  // 随魂印存活，不随上下场作废
+    context->updater_effects.register_effect(State::BATTLE_ROUND_COMPLETION, owner,
+                                             std::move(ce), context->round_effect_valid_id[owner]);
+}
+
+// SoulMark::activate_soul_mark — 登场激活（战斗开始 OPERATION_ENTER_EXIT_STAGE / 切换上场）。
+// ① 注册符合作用域的节点到各自时点桶（STAGE 需 owner_on_stage；ROSTER 恒注册）；
 // ② 立即执行 early 信号节点（如 2260 的 ignore_pp/force_execute_on_pp0 须在选择前置位）。
-// 与 register_soul_effect（ROUND_START 每回合重注册重断言）配合。
-void SoulMark::activate_soul_mark(BattleContext* context, int owner) {
+// 每回合的 once 刷新由**更新器桶**在回合首时点重调 register_soul_effect 完成（不经过本方法，
+// 故不会重复触发 early/on_enter）。
+void SoulMark::activate_soul_mark(BattleContext* context, int owner, bool owner_on_stage) {
     if (!context || owner < 0 || owner > 1) {
         return;
     }
+    // 两条链路都要注册进桶：
+    //   程序链路 → 各节点按 trigger_state/scope 注册；
+    //   单效果链路（旧）→ 注册到 BATTLE_ROUND_START 每回合执行（原先这一步靠 FSM 的
+    //     ROUND_START 循环补，该循环已删除——注册必须在这里完成，否则旧链路魂印不会进桶）。
+    register_soul_effect(context, owner, owner_on_stage);
+
     if (has_program_) {
-        register_soul_effect(context, owner);  // 战斗开始即注册，round-1 时点可触发
         for (const auto& node : program_) {
-            if (node.early && node.effect_fn) {
+            // early 信号节点同样受 scope 约束：STAGE 节点只在宿主上场时置位，
+            // 否则场下的魂印会把自己的信号（如 2260 的 ignore_pp）错误地施加给场上精灵。
+            const bool scope_live = (node.scope == SoulScope::ROSTER) || owner_on_stage;
+            if (node.early && node.effect_fn && scope_live) {
                 node.effect_fn(context, bind_soulmark_args(args, owner));
             }
+        }
+        if (hooks_.on_enter) {
+            hooks_.on_enter(context, owner);
         }
         return;
     }
     if (!effect) {
         return;
     }
+    // 单效果链路：除了注册到桶，还立即执行一次（保持原 activate 语义——战斗开始即生效）。
     effect(context, bind_soulmark_args(args, owner));
 }
 
-// SoulMark::register_soul_effect — 激活魂印效果链。
-// 程序链路：每个节点按 trigger_state 注册进魂印桶（ON_STAGE 作用域、source_id=魂印 id
-// 同源去重、once 节点带 once_=回合限一次）。每回合重注册（FSM handle_BattleRoundStart 调）。
-// 单效果链路（旧）：effect 包成 ContinuousEffect 注册到 BATTLE_ROUND_START 每回合执行。
-void SoulMark::register_soul_effect(BattleContext* context, int owner) {
+// SoulMark::deactivate_soul_mark — 离场/阵亡。
+// 只负责调用 on_exit 钩子做"桶外状态"的额外清理（如薇尔诗 2513 的全局抑制标记）。
+// 效果桶内的条目由调用方 invalidate_on_stage_effects 递增 epoch 作废（O(1)，无需遍历）。
+void SoulMark::deactivate_soul_mark(BattleContext* context, int owner) {
+    if (!context || owner < 0 || owner > 1) {
+        return;
+    }
+    if (hooks_.on_exit) {
+        hooks_.on_exit(context, owner);
+    }
+}
+
+// SoulMark::register_soul_effect — 注册魂印效果链（登场时 + 更新器每回合刷新时调用）。
+// 程序链路：每个节点按 trigger_state 注册进魂印桶（source_id=魂印 id 同源去重、
+//   once 节点带 once_=回合限一次）。scope 决定注册条件与作废语义：
+//     STAGE  → 仅 owner_on_stage 时注册；ContinuousEffect::scope_ = ON_STAGE（离场 epoch 作废）
+//     ROSTER → 无条件注册；ContinuousEffect::scope_ = TEAM（跨切换保留，断回合也不作废）
+// 单效果链路（旧）：effect 包成 ContinuousEffect 注册到 BATTLE_ROUND_START（恒收）。
+void SoulMark::register_soul_effect(BattleContext* context, int owner, bool owner_on_stage) {
     if (!context || owner < 0 || owner > 1) {
         return;
     }
@@ -311,16 +392,20 @@ void SoulMark::register_soul_effect(BattleContext* context, int owner) {
             if (!node.effect_fn) {
                 continue;
             }
+            const bool is_roster = (node.scope == SoulScope::ROSTER);
+            if (!is_roster && !owner_on_stage) {
+                continue;  // STAGE 节点：宿主不在场则不注册
+            }
             Effect wrapper(id, 0, owner, /*left_round=*/-1,
                            bind_soulmark_args(args, owner), node.effect_fn);
             auto ce = std::make_unique<ContinuousEffect>(
                 wrapper, node.trigger_state, owner, /*duration=*/-1, context->roundCount
             );
             ce->source_id_ = id;
-            ce->scope_ = EffectScope::ON_STAGE;
+            // ROSTER → TEAM：跨切换保留且不被断回合作废（常驻效果的语义）
+            ce->scope_ = is_roster ? EffectScope::TEAM : EffectScope::ON_STAGE;
             ce->once_ = node.once;
-            context->registerEffect(node.trigger_state, owner, std::move(ce),
-                                    EffectContainer::SoulMark);
+            context->register_soulmark_effect(node.trigger_state, owner, std::move(ce));
         }
         return;
     }
@@ -333,6 +418,5 @@ void SoulMark::register_soul_effect(BattleContext* context, int owner) {
     );
     ce->source_id_ = id;
     ce->scope_ = EffectScope::ON_STAGE;
-    context->registerEffect(State::BATTLE_ROUND_START, owner, std::move(ce),
-                            EffectContainer::SoulMark);
+    context->register_soulmark_effect(State::BATTLE_ROUND_START, owner, std::move(ce));
 }

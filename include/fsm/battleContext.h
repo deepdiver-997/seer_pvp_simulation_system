@@ -89,6 +89,7 @@ public:
     // invalidate_on_stage_effects 清自己桶 → 换宠可洗掉封属性）。
     // 按被拦截方 owner 索引；每条显式带 target（不靠"在哪个桶"推断）。
     // 次数型（remaining>0）命中消费；回合型（remaining_rounds>0）每回合递减、可被断回合。
+    // 加一个免断回合的属性，然后断回合原语需要查询对面有没有免断决定返回结果
     struct SkillSeal {
         int target = -1;          // 封锁对象（被拦截方），显式
         int effect_id = -1;       // 来源效果 id：覆盖去重 key（同效果覆盖刷新）
@@ -157,6 +158,16 @@ public:
     //--- 魂印效果执行表 ---
     // 与技能桶同类容器；执行顺序上魂印先于技能（execute_registered_actions）。
     TimedBucket soul_mark_effects;
+
+    //--- 更新器桶（回合首时点执行）---
+    // 每个"活动中的魂印"在此登记一个更新器对象；FSM 在 ROUND_COMPLETION 末尾（advanceRound
+    // 之后、跳 OPERATION_CHOOSE_SKILL_MEDICAMENT 之前）执行本桶 → 各更新器重注册自己的魂印节点。
+    //
+    // 为什么需要它：once 节点执行后会被移出桶（回合限一次），而原先的重注册挂在
+    // BATTLE_ROUND_START——它在 CHOOSE **之后**才跑，导致本回合选择期缺失这些效果（迟到一拍）。
+    // 更新器在回合边界刷新，保证玩家进入选择期时本回合魂印效果已就位。
+    // 条目为 TEAM 作用域（随魂印存活，不随上下场作废）；宿主阵亡后查找失败即自然失效。
+    TimedBucket updater_effects;
 
     //--- 被动效果表 ---
     std::array<std::map<int, ContinuousEffect*>, 2> passiveEffects;
@@ -236,6 +247,12 @@ public:
     //--- 效果执行 ---
     void execute_pending_effects(int robotId, State state);
     void execute_registered_actions(int robotId, State state);
+
+    // 回合首时点：执行更新器桶（刷新各魂印节点，once 复位）。由 FSM 在回合边界调用。
+    void execute_updater_actions() {
+        updater_effects.execute_at(State::BATTLE_ROUND_COMPLETION, 0, this);
+        updater_effects.execute_at(State::BATTLE_ROUND_COMPLETION, 1, this);
+    }
 
     //--- 效果查询 ---
     template<int EffectId>
@@ -332,6 +349,7 @@ public:
     void clearAllEffects() {
         skills_effects.clear();
         soul_mark_effects.clear();
+        updater_effects.clear();
         pending_effects.clear();
         penetration_grants[0].clear();
         penetration_grants[1].clear();

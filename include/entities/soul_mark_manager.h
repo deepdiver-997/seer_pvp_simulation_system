@@ -26,6 +26,8 @@ public:
     void registerSoulMark(int soulmark_id, EffectFn effect_fn) override;
     void registerSoulMarkProgram(int soulmark_id,
                                  const std::vector<SoulMarkNodeRef>& nodes) override;
+    // 魂印级钩子（登场/离场额外动作；见 plugin_interface.h SoulMarkHooks）。
+    void registerSoulMarkHooks(int soulmark_id, const SoulMarkHooks& hooks) override;
     void registerSkillEffect(int effect_id, EffectFn effect_fn) override;
     void registerSoulMarks(
         const std::vector<std::pair<int, EffectFn>>& soulmarks) override;
@@ -37,6 +39,9 @@ public:
 
     // 查询魂印程序（多时点节点）。未注册程序返回 nullptr（调用方回退单效果链路）。
     const std::vector<SoulMarkNodeRef>* getSoulMarkProgram(int soulmarkId) const;
+
+    // 查询魂印钩子。未注册返回 nullptr（调用方视作无额外动作）。
+    const SoulMarkHooks* getSoulMarkHooks(int soulmarkId) const;
 
     // 检查是否已初始化
     bool isInitialized() const { return initialized_; }
@@ -64,6 +69,8 @@ private:
     std::unordered_map<int, EffectFn> effect_cache_;
     // 魂印程序缓存：魂印ID -> 多时点节点（程序模型；单效果链路不在此表）。
     std::unordered_map<int, std::vector<SoulMarkNodeRef>> program_cache_;
+    // 魂印钩子缓存：魂印ID -> 登场/离场钩子（只在插件显式注册时存在）。
+    std::unordered_map<int, SoulMarkHooks> hooks_cache_;
     mutable std::shared_mutex cache_mutex_;
 
     // 加载的动态库（保持加载状态，防止函数指针失效）

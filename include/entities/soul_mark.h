@@ -32,6 +32,9 @@ public:
         } else {
             effect = mgr.getEffectFunc(id);
         }
+        if (const SoulMarkHooks* hooks = mgr.getSoulMarkHooks(id)) {
+            hooks_ = *hooks;
+        }
     }
 
     int id = 0;
@@ -49,15 +52,37 @@ public:
     std::vector<int> kind_tags;
     // 归属精灵 id（现代魂印链路填充；0 = 未知）。
     int monster_id = 0;
-    // 激活魂印效果：
-    // - 程序链路：把每个节点按 trigger_state 注册进魂印桶；每回合（ROUND_START）重注册重断言。
-    // - 单效果链路：把 effect 包成 ContinuousEffect 注册进魂印桶（BATTLE_ROUND_START）。
-    void register_soul_effect(BattleContext* context, int owner);
-    // 魂印激活（战斗开始 OPERATION_ENTER_EXIT_STAGE，早于首轮技能选择）：
-    // 注册全部节点到对应时点桶 + 立即执行 early 节点（信号在选择前就绪）。
-    // 与 register_soul_effect（每回合重断言）配合。
-    void activate_soul_mark(BattleContext* context, int owner);
-    void unregister_soul_effect(BattleContext* context);
+    // 魂印级钩子（登场/离场额外动作）。默认全空 = 只走引擎的节点注册 + epoch 作废。
+    SoulMarkHooks hooks_;
+
+    // 是否有需要"出战背包存活即注册"的常驻节点（scope == ROSTER）。
+    bool has_roster_nodes() const {
+        for (const SoulMarkNodeRef& node : program_) {
+            if (node.scope == SoulScope::ROSTER) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // 注册魂印节点到对应时点桶（更新器桶在回合首时点会重调本方法刷新 once 效果）。
+    // - 程序链路：按节点 trigger_state 注册；scope 决定注册条件与作废语义：
+    //     STAGE  → 仅 owner_on_stage 时注册，ContinuousEffect::scope_ = ON_STAGE（离场 epoch 作废）
+    //     ROSTER → 无条件注册（只要宿主存活），ContinuousEffect::scope_ = TEAM（跨切换保留）
+    // - 单效果链路：effect 包成 ContinuousEffect 注册到 BATTLE_ROUND_START（恒收）。
+    void register_soul_effect(BattleContext* context, int owner, bool owner_on_stage = true);
+
+    // 魂印激活（登场：战斗开始 OPERATION_ENTER_EXIT_STAGE / 切换上场 perform_switch）：
+    // 注册符合作用域的节点 + 立即执行 early 节点（信号在选择前就绪）+ 调用 on_enter 钩子。
+    void activate_soul_mark(BattleContext* context, int owner, bool owner_on_stage = true);
+
+    // 在更新器桶登记"每回合刷新本魂印节点"的对象（回合边界执行，刷新 once 效果）。
+    // 登场时调用一次即可（条目 source_id 去重，重复调用幂等）。
+    void register_updater(BattleContext* context, int owner);
+
+    // 魂印离场（切换下场 / 阵亡）：调用 on_exit 钩子做额外清理。
+    // 注意：效果桶的作废由调用方的 invalidate_on_stage_effects（epoch 递增）完成，
+    //       本方法只管"不在桶里"的额外状态（如薇尔诗 2513 的全局抑制标记）。
+    void deactivate_soul_mark(BattleContext* context, int owner);
 };
 
 #endif // SOUL_MARK_H

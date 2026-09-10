@@ -217,14 +217,25 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     if (ctx->on_stage[robot_id] == target_slot) {
         return;  // 切到同一只，无事发生（主动切换在操作选择时点已做完；这里只是 no-op 兜底）
     }
+    // 旧宠引用（on_stage 改写后 getPet 就指向新宠了，故先取）
+    ElfPet& old_pet = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]];
     // ① 清旧宠公共状态：ON_STAGE 效果 + 穿透授予 + 命中失效 + 魂印信号 + 拦截桶
     ctx->invalidate_on_stage_effects(robot_id);
+    // ①' 旧宠魂印离场钩子：只在"该魂印不依赖出战背包"（无 ROSTER 节点）时触发。
+    //     常驻魂印（如星皇 903 / 薇尔诗 2513）下场后仍在背包生效，不能在这里关掉。
+    if (!old_pet.soulMark.has_roster_nodes()) {
+        old_pet.soulMark.deactivate_soul_mark(ctx, robot_id);
+    }
     // ② 清旧宠异常状态
     ctx->clear_on_stage_abnormal_statuses(robot_id);
     // ③ 更新在场槽位
     ctx->on_stage[robot_id] = target_slot;
-    // ④ 新精灵魂印激活（early 信号立即生效；ROUND_START 节点下回合重注册）
-    ctx->getPet(robot_id).soulMark.activate_soul_mark(ctx, robot_id);
+    // ④ 新精灵魂印激活（登场：STAGE 节点注册 + early 信号 + on_enter 钩子）+ 登记更新器
+    {
+        ElfPet& new_pet = ctx->getPet(robot_id);
+        new_pet.soulMark.activate_soul_mark(ctx, robot_id, /*owner_on_stage=*/true);
+        new_pet.soulMark.register_updater(ctx, robot_id);
+    }
     // ⑤ ws 同步新精灵数值（伤害/先手判定用）
     sync_workspace_from_on_stage(ctx);
     // 主动切换场景：EVENT_SWAP 已在 handle_OperationChooseSkillMedicament 收到
@@ -645,13 +656,44 @@ void BattleFsm::handle_GameStart(BattleContext* battleContext) {
 
 void BattleFsm::handle_OperationEnterExitStage(BattleContext* battleContext) {
     log("Operation: Enter/Exit Stage.");
-    // 魂印激活（战斗开始，早于首轮技能选择）：
-    // 立即执行一次魂印 effect 设置持久信号（如 2260 的 ignore_pp/force_execute_on_pp0），
+    // 魂印激活（战斗开始，早于首轮技能选择）。
+    //
+    // 遍历**全部 6 个槽位**而非仅 on_stage：常驻（scope=ROSTER）魂印要求
+    // "宿主存活于出战背包即生效"，不要求在场（如瀚宇星皇 903 场下提供星皇之赐/之佑、
+    // 薇尔诗 2513 场下开场域抑制）。owner_on_stage 决定 STAGE 节点是否注册。
+    // 立即执行 early 信号节点（如 2260 的 ignore_pp/force_execute_on_pp0），
     // 使 PP=0 等条件在选择期（OPERATION_CHOOSE_SKILL_MEDICAMENT）就绪。
-    // ROUND_START 的 register_soul_effect 仍每回合重断言。
+    //
+    // 每回合的 once 刷新不在这里，由**更新器桶**在回合首时点（ROUND_COMPLETION 末尾）完成。
     for (int i = 0; i < 2; ++i) {
-        ElfPet& pet = battleContext->seerRobot[i].elfPets[battleContext->on_stage[i]];
-        pet.soulMark.activate_soul_mark(battleContext, i);
+        // 同一魂印 id 每方只激活一次（擂台规则：单边同 ID 精灵只能带一只；效果也不叠加）。
+        // 先激活场上槽（owner_on_stage=true），再扫背包槽——保证 STAGE 节点在场上那只身上注册。
+        std::vector<int> activated_ids;
+        auto activate_slot = [&](int slot, bool owner_on_stage) {
+            if (slot < 0 || slot >= 6) {
+                return;
+            }
+            ElfPet& pet = battleContext->seerRobot[i].elfPets[slot];
+            if (pet.hp <= 0) {
+                return;  // 阵亡精灵不提供魂印效果
+            }
+            const int mark_id = pet.soulMark.id;
+            if (mark_id > 0) {
+                if (std::find(activated_ids.begin(), activated_ids.end(), mark_id)
+                    != activated_ids.end()) {
+                    return;  // 本方同魂印已激活过
+                }
+                activated_ids.push_back(mark_id);
+            }
+            pet.soulMark.activate_soul_mark(battleContext, i, owner_on_stage);
+            pet.soulMark.register_updater(battleContext, i);  // 回合边界刷新节点（once 复位）
+        };
+        activate_slot(battleContext->on_stage[i], /*owner_on_stage=*/true);
+        for (int slot = 0; slot < 6; ++slot) {
+            if (slot != battleContext->on_stage[i]) {
+                activate_slot(slot, /*owner_on_stage=*/false);
+            }
+        }
     }
     battleContext->execute_registered_actions(-1, State::OPERATION_ENTER_EXIT_STAGE);
     battleContext->generateState();
@@ -777,13 +819,9 @@ void BattleFsm::handle_BattleRoundStart(BattleContext* battleContext) {
         }
     }
     sync_workspace_from_on_stage(battleContext);
-    // 魂印激活（SET 端最小实现）：在场精灵魂印注册到 ROUND_START 桶，本轮即执行。
-    // 每回合重注册（同源去重），幂等信号类魂印（如 2260 设 force_execute_on_pp0/ignore_pp）天然正确；
-    // 一次性/条件激活语义留"激活谓词"任务。
-    for (int i = 0; i < 2; ++i) {
-        ElfPet& pet = battleContext->seerRobot[i].elfPets[battleContext->on_stage[i]];
-        pet.soulMark.register_soul_effect(battleContext, i);
-    }
+    // 注：魂印的每回合重注册**不在这里**——ROUND_START 晚于本回合的 CHOOSE（线性序里
+    // OPERATION_CHOOSE_SKILL_MEDICAMENT 在前），在此注册会让选择期缺失 once 效果（迟到一拍）。
+    // 重注册已改由**更新器桶**在 ROUND_COMPLETION 末尾完成（见 handle_BattleRoundCompletion）。
     battleContext->execute_registered_actions(-1, State::BATTLE_ROUND_START);
     battleContext->generateState();
 }
@@ -1204,6 +1242,12 @@ void BattleFsm::handle_BattleRoundCompletion(BattleContext* battleContext) {
     battleContext->roundChoice[1][0] = -1;
     battleContext->roundChoice[1][1] = -1;
     battleContext->set_current_player(0);
+
+    // 回合首时点：执行更新器桶，刷新各魂印节点（once 复位）。
+    // 放在 advanceRound 之后、跳 CHOOSE 之前——玩家进入选择期时本回合魂印效果已就位
+    // （这正是原先挂在 ROUND_START 会"迟到一拍"的原因：ROUND_START 排在 CHOOSE 之后）。
+    battleContext->execute_updater_actions();
+
     battleContext->currentState = State::OPERATION_CHOOSE_SKILL_MEDICAMENT;
 }
 

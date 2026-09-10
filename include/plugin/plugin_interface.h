@@ -14,21 +14,56 @@ enum class EffectResult : int;
 // Effect function type (same as defined in effect.h)
 using EffectFn = EffectResult (*)(BattleContext*, const EffectArgs&);
 
+// 魂印节点的注册作用域。
+//   STAGE （默认）：随精灵上下场——只在宿主精灵于场上时注册；离场时由 epoch 作废。
+//                   适用于"只影响自身/自身在场才成立"的魂印（如无为觉者 2260）。
+//   ROSTER        ：常驻——只要宿主精灵存活于出战背包（不一定在场）就注册，跨切换保留。
+//                   适用于"在场下也提供效果"的魂印（如瀚宇星皇 903 的星皇之赐/之佑、
+//                   薇尔诗 2513 的场域抑制）。
+// 作用域在**节点**级：一个魂印可以混用（多数魂印整体是同一作用域）。
+// 判定"源此刻在场上还是场下"用 BattleContext::find_pet_with_soulmark。
+enum class SoulScope {
+    STAGE,
+    ROSTER,
+};
+
 // 魂印程序节点（插件面）：一个时点 + 一个效果函数。
 // 对等 skill 的 SkillEffectNode，但坍缩掉"执行结果分叉"维度——魂印只有"时点"。
 // trigger_state：触发时点（State 枚举）。
-// once：触发一次后移除（回合限一次；下回合由 ROUND_START 重新注册）。
+// once：触发一次后移除（回合限一次；下回合由**更新器桶**在回合首时点重注册刷新）。
 // early：战斗开始立即执行一次（信号类，如 2260 的 ignore_pp 须在选择技能前就绪）。
 // effect_fn：节点效果函数（插件自写，args[0]=owner, args[1]=1-owner 由引擎绑定）。
+// scope：注册作用域（见 SoulScope）。
 struct SoulMarkNodeRef {
     State trigger_state = State::BATTLE_ROUND_START;
     EffectFn effect_fn = nullptr;
     bool once = false;
     bool early = false;
+    SoulScope scope = SoulScope::STAGE;
 
     SoulMarkNodeRef() = default;
-    SoulMarkNodeRef(State trigger, EffectFn fn, bool once_ = false, bool early_ = false)
-        : trigger_state(trigger), effect_fn(fn), once(once_), early(early_) {}
+    SoulMarkNodeRef(State trigger, EffectFn fn, bool once_ = false, bool early_ = false,
+                    SoulScope scope_ = SoulScope::STAGE)
+        : trigger_state(trigger), effect_fn(fn), once(once_), early(early_), scope(scope_) {}
+};
+
+// 魂印级可选钩子（插件提供；留空则走引擎默认行为）。
+//
+// 与节点注册/作废的分工：
+//   - 「登场注册 / 下场作废」本身由引擎按节点的 scope 自动完成（注册节点 + epoch 作废）；
+//   - 钩子是**在引擎默认行为之外**的额外动作。
+//
+// on_enter：登场时（战斗开始 / 切换上场）在引擎重注册节点之后调用。
+// on_exit ：离场 / 阵亡时在引擎 epoch 作废之外调用，用于清理**不在效果桶里**的状态。
+//           典型：薇尔诗 2513 离场时要关掉它注册的全局抑制标记（该标记是 context 字段，
+//           不在桶里，epoch 作废管不到它，必须显式清）。
+//
+// 签名与 EffectFn 一致但不取 args（免去插件自己绑 owner 的样板）；owner 由引擎传入。
+using SoulMarkHookFn = void (*)(BattleContext*, int owner);
+
+struct SoulMarkHooks {
+    SoulMarkHookFn on_enter = nullptr;
+    SoulMarkHookFn on_exit = nullptr;
 };
 
 // Plugin interface version for compatibility checking
@@ -52,6 +87,12 @@ public:
     // Register a soul mark program（多时点：一个魂印 = 多个 State→effect 节点）。
     virtual void registerSoulMarkProgram(int soulmark_id,
                                          const std::vector<SoulMarkNodeRef>& nodes) = 0;
+
+    // 注册魂印级钩子（可选取）。默认空实现，不强制既有实现者改写。
+    virtual void registerSoulMarkHooks(int soulmark_id, const SoulMarkHooks& hooks) {
+        (void)soulmark_id;
+        (void)hooks;
+    }
 
     // Register a skill/move effect
     virtual void registerSkillEffect(int effect_id, EffectFn effect_fn) = 0;
