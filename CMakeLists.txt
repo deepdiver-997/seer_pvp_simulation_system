@@ -20,7 +20,6 @@ find_package(Threads REQUIRED)
 set(SIM_CORE_SOURCES
     src/primitives/battle_primitives.cpp
     src/db/official_data_repository.cpp
-    src/effects/continuousEffect.cpp
     src/effects/effect.cpp
     src/effects/effect_meta.cpp
     src/effects/effect_unit.cpp
