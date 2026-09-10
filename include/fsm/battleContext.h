@@ -307,6 +307,29 @@ public:
         }
     }
 
+    //--- 技能无效条目授予（内联入口，仿 grant_immunity）---
+    // 插件动态库不链接 sim_core（CLAUDE.md 3.9），seal_skill 原语与
+    // SkillInvalidCenter::register_armor 均非 inline 调不了——这是插件挂"盔/威/封属"
+    // 的唯一入口。语义对齐 seal_skill 原语：
+    //   target = 被拦截方（条目挂它桶上，**它**的技能使用被无效；盔的"持有者"是语义概念，
+    //            物理上挂在使用方桶，见技能判定流程与无效效果体系.md §5.2）；
+    //   counts/rounds 二选一（>0 生效：次数型响应即耗，回合型响应不消耗）；
+    //   同 (target, source_slot, effect_id, kind) 覆盖刷新。
+    void grant_skill_invalid(int target, int source_slot, int effect_id, SkillArmor::Kind kind,
+                             int counts, int rounds, bool penetrable,
+                             InvalidBinding binding = InvalidBinding::SELF) {
+        if (target < 0 || target > 1) {
+            return;
+        }
+        SkillArmor armor;
+        armor.kind = kind;
+        armor.remaining_counts = counts;
+        armor.remaining_rounds = rounds;
+        armor.penetrable = penetrable;
+        armor.source_effect_id = effect_id;
+        skill_invalid_center_.register_armor(target, source_slot, armor, binding);
+    }
+
     //--- 伤害抗性有效视图 ---
     // 把 owner 当前在场精灵的**本体**伤害抗性刷进 ws 计算视图（基线重基）。
     // 调用点：sync_workspace_from_on_stage（回合开始 / 换宠）——两者都要，因为 ws 每回合

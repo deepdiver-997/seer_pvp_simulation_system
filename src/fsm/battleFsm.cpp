@@ -297,6 +297,14 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     }
     // ⑤ ws 同步新精灵数值（伤害/先手判定用）
     sync_workspace_from_on_stage(ctx);
+    // ⑥ 上场事件：perform_switch 是**主动中切**与**死亡换宠**的共同漏斗，在此统一 emit
+    //    EVENT_ENTER_STAGE（actor=登场方）——两条路径都覆盖。drain 在当前状态桶跑完后，
+    //    届时新精灵已完全就位（on_stage 已更新、旧宠已 invalidate、新宠已激活、ws 已同步），
+    //    "下一个登场精灵"类 watcher（如自爆传承、帝皇之御）在回调里挂到的是干净桶。
+    //    注：切到同一只（on_stage==target_slot）在上面早返回，不算登场、不发事件。
+    ctx->event_center_.emit(
+        BattleEvent{EventType::EVENT_ENTER_STAGE, robot_id, 1 - robot_id, 0});
+
     // 主动切换场景：EVENT_SWAP 已在 handle_OperationChooseSkillMedicament 收到
     // CHOOSE_PET 时 emit（perform_switch 也在那里同步完成，让 drain 时 watch_callback
     // 看到的是新精灵）。死亡换宠（handle_ChooseAfterDeath）路径下 perform_switch 是

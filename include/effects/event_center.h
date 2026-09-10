@@ -244,10 +244,14 @@ private:
                 && watcher.valid_id_ != watcher_valid_id[watcher.owner]) {
                 continue;
             }
+            // ⚠️ once 提前拷贝：fn 内部可能自删（remove_watcher 自身 id）——删除后
+            //    watcher 引用悬垂，不能再读其成员。"回调内自删"是"下一只/下一次"类
+            //    监控的推荐写法（once=true 无法做"过滤后才算触发"）。
+            const bool once = watcher.once;
             if (watcher.fn) {
                 watcher.fn(ctx, event);
             }
-            if (watcher.once) {
+            if (once) {
                 remove_watcher(wid);
             }
         }
