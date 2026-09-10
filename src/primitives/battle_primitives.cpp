@@ -186,19 +186,24 @@ BreakResult break_round_effects(BattleContext* ctx, int target) {
     }
 
     // 对手没有可清除的回合类效果 → 清除失败（无事发生），不 emit。
-    // 回合型技能拦截（remaining_rounds>0）也算回合类效果（可被断清除）。
+    // 回合型技能拦截（remaining_rounds>0）也算回合类效果（可被断清除），
+    // **但免断（unbreakable）的不算**——若对手只剩免断回合类效果，等同于无可清除物。
     auto& seals = ctx->skill_seals[target];
-    const bool has_round_seal = std::any_of(
+    const bool has_breakable_round_seal = std::any_of(
         seals.begin(), seals.end(),
-        [](const BattleContext::SkillSeal& s) { return s.remaining_rounds > 0; });
-    if (!ctx->has_round_effects(target) && !has_round_seal) {
+        [](const BattleContext::SkillSeal& s) {
+            return s.remaining_rounds > 0 && !s.unbreakable;
+        });
+    if (!ctx->has_round_effects(target) && !has_breakable_round_seal) {
         return BreakResult::NO_EFFECTS;
     }
 
     // 成功：机械无效化 + 事件（补偿 watcher 在 FSM drain 点投递）
     ctx->invalidate_all_round_effects(target);
-    // 断回合清回合型技能拦截（次数型 remaining>0 保留）
-    std::erase_if(seals, [](const BattleContext::SkillSeal& s) { return s.remaining_rounds > 0; });
+    // 断回合清回合型技能拦截（次数型 remaining>0 保留；免断的回合型也保留）
+    std::erase_if(seals, [](const BattleContext::SkillSeal& s) {
+        return s.remaining_rounds > 0 && !s.unbreakable;
+    });
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_BREAK, ctx->opponent(target), target});
     return BreakResult::SUCCESS;
 }
@@ -235,12 +240,14 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     }
 
     // 粉伤抗性层（固定/百分比伤害）：免疫粉伤 → 对应来源抗性% → 减粉% 逐级削减。
-    // 伤害抗性按来源分型：FIXED 走 fixed_resist_pct、PERCENT 走 percent_resist_pct（官方：暴击/固定/百分比）。
+    // 伤害抗性按来源分型：FIXED 走固定抗性、PERCENT 走百分比抗性（官方：暴击/固定/百分比）。
+    // ⚠️ 读的是 ws **有效视图**而非 pet 本体——临时 buff 可修改抗性（混元天尊死亡 buff
+    //    把己方精灵抗性视为 100%）。视图基线由 sync_damage_resist_view 在回合开始/换宠重基。
     // 被挡下（<=0）且粉转真 → 改以真实伤害结算（直通护盾/护罩、穿抗性/免疫）。TRUE 绕过此层。
     if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
         const int resist_pct =
-            kind == DamageKind::FIXED ? ctx->fixed_resist_pct[target]
-                                      : ctx->percent_resist_pct[target];
+            kind == DamageKind::FIXED ? ctx->ws.eff_fixed_resist_pct[target]
+                                      : ctx->ws.eff_percent_resist_pct[target];
         if (ctx->pink_immune[target]) {
             effective = 0;
         } else {
@@ -288,7 +295,7 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 }
 
 void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
-                int count, int duration_rounds, bool penetrable) {
+                int count, int duration_rounds, bool penetrable, bool unbreakable) {
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
@@ -304,11 +311,13 @@ void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, b
             s.seal_attribute = attribute;
             s.seal_attack = attack;
             s.penetrable = penetrable;
+            s.unbreakable = unbreakable;
             return;
         }
     }
     seals.push_back(BattleContext::SkillSeal{
-        target, effect_id, count, duration_rounds, attribute, attack, penetrable, /*armor_level=*/0,
+        target, effect_id, count, duration_rounds, attribute, attack, penetrable,
+        /*armor_level=*/0, unbreakable,
     });
 }
 

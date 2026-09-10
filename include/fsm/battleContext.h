@@ -102,6 +102,11 @@ public:
         bool seal_attack = false;     // 封锁攻击技能（category=1/2）
         bool penetrable = true;   // 可否被"无视攻击免疫"穿透：false=条件盔/龙威，恒被挡
         int  armor_level = 0;     // 盔等级：0=可穿盔, 1=条件盔, 2=龙威（本轮只存不比较）
+        // 免断：该回合型拦截**不被断回合清除**。
+        // 官方依据（reference idx=473）：魂印回合龙威 / 魂印伪龙威均为"不可断"；
+        // 对照：技能回合真龙威"会被魂印消回合"。故这是**单个 seal 的属性**，
+        // 与 owner 级的 ImmunityType::BREAK（我整方免断）是两回事，两者都要查。
+        bool unbreakable = false;
         // 后期要不要也做成位图避免枚举膨胀？
     };
     std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
@@ -141,14 +146,11 @@ public:
     int elf_element_view[2][2]{};              // 当前在场精灵有效系别
     int elf_element_view_bound_slot[2]{-1, -1};  // 已绑定槽（-1=未基线）
 
-    //--- 粉伤抗性（on-stage 作用域，切换/清场清）---
-    // 这个抗性我觉得放在pet里最好，然后workspace也要有一套用于计算视图，因为像混元天尊的特性，其死亡给予的三回合buff可以让己方精灵的两个粉伤抗性被视为100%
-    // 但是3回合一过又会恢复，所以计算粉伤也要走ws，最后就是一个小点，如果精灵本身粉伤抗性等于0即没有开启，那么这个buff就不会改变，因为它只能提升非0到100%
-    // 伤害抗性按来源分三种（官方：暴击/固定/百分比），逐型削减对应伤害。
+    //--- 粉伤相关临时状态（on-stage 作用域，切换/清场清）---
+    // 注：**伤害抗性本体**（暴击/固定/百分比）已迁到 `ElfPet::damage_resist`（跨切换保留），
+    //     计算时读 `ws.eff_*_resist_pct` 有效视图（见 BattleWorkspace 与 sync_damage_resist_view）。
+    //     这里留的都是**效果授予的临时状态**，随切换作废是对的。
     bool pink_immune[2]{};     // 免疫粉伤（固定/百分比伤害）
-    int  fixed_resist_pct[2]{};   // 固定伤害抗性%
-    int  percent_resist_pct[2]{}; // 百分比伤害抗性%
-    int  crit_resist_pct[2]{};    // 暴击伤害抗性%（削减暴击加成部分）
     int  pink_reduce_pct[2]{}; // 减粉%（百分比免减，固定+百分比通用）
     bool pink_to_true[2]{};    // 粉转真：被免疫/抗性/减粉挡下时改以真实伤害结算
     int  heal_mod_pct[2]{};    // 恢复效果修正%（正=提升，负=降低；封回血=-100 等价），heal 原语应用
@@ -300,6 +302,28 @@ public:
         }
     }
 
+    //--- 伤害抗性有效视图 ---
+    // 把 owner 当前在场精灵的**本体**伤害抗性刷进 ws 计算视图（基线重基）。
+    // 调用点：sync_workspace_from_on_stage（回合开始 / 换宠）——两者都要，因为 ws 每回合
+    // reset 会清视图，而换宠要换成新精灵的本体值。
+    //
+    // ⚠️ 临时 buff 只改 ws.eff_*_resist_pct，**不要**回头调本方法（会被本体覆盖）。
+    //     buff 的典型形态是"把非 0 的抗性视为 100%"——本体为 0（未开抗性）时 buff 不生效。
+    void sync_damage_resist_view(int owner) {
+        if (owner < 0 || owner > 1) {
+            return;
+        }
+        const ElfPet& pet = seerRobot[owner].elfPets[on_stage[owner]];
+        ws.eff_crit_resist_pct[owner] = pet.damage_resist.crit_pct;
+        ws.eff_fixed_resist_pct[owner] = pet.damage_resist.fixed_pct;
+        ws.eff_percent_resist_pct[owner] = pet.damage_resist.percent_pct;
+    }
+
+    void sync_damage_resist_view_all() {
+        sync_damage_resist_view(0);
+        sync_damage_resist_view(1);
+    }
+
     //--- 效果注册（插件内联入口）---
     // 插件动态库（moves_lib / soul_lib）不链接 sim_core，只能调头文件内联方法。
     // 这两个入口是插件注册效果的唯一途径——valid_id 绑定、同源去重、回合计数回滚
@@ -337,10 +361,9 @@ public:
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
         skill_seals[owner].clear();  // 拦截挂在被拦截方桶：换宠洗掉自己身上的封属性
-        pink_immune[owner] = false;          // 粉伤抗性不继承给新精灵
-        fixed_resist_pct[owner] = 0;
-        percent_resist_pct[owner] = 0;
-        crit_resist_pct[owner] = 0;
+        pink_immune[owner] = false;          // 临时粉伤状态不继承给新精灵
+        // 注：伤害抗性本体在 pet 上（跨切换保留），不在此清；ws 有效视图由
+        //     调用方的 sync_workspace_from_on_stage → sync_damage_resist_view 从新精灵重基。
         pink_reduce_pct[owner] = 0;
         pink_to_true[owner] = false;
         heal_mod_pct[owner] = 0;             // 恢复效果修正不继承
@@ -366,9 +389,6 @@ public:
         pp_reverse[0] = false;
         pp_reverse[1] = false;
         pink_immune[0] = pink_immune[1] = false;
-        fixed_resist_pct[0] = fixed_resist_pct[1] = 0;
-        percent_resist_pct[0] = percent_resist_pct[1] = 0;
-        crit_resist_pct[0] = crit_resist_pct[1] = 0;
         pink_reduce_pct[0] = pink_reduce_pct[1] = 0;
         pink_to_true[0] = pink_to_true[1] = false;
         heal_mod_pct[0] = heal_mod_pct[1] = 0;

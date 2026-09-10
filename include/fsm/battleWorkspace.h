@@ -74,6 +74,15 @@ struct BattleWorkspace {
     int  view_levels[2][6];         // 本回合能力提升/下降等级，受到视强为弱、示弱为强效果修正，但是不会改变真实能力上升/下降等级
     int view_elementalAttributes[2][2];
 
+    //========== 伤害抗性有效视图（本回合计算用）==========
+    // 伤害计算一律读这里，不直接读 pet.damage_resist——因为临时 buff 可以修改抗性
+    // （如混元天尊死亡 buff：己方精灵抗性**被视为 100%**，3 回合后恢复）。
+    // 基线由 sync_damage_resist_view 在回合开始 / 换宠时从 pet.damage_resist 重基；
+    // 临时 buff 在本回合内直接改视图（回合 reset 后由 buff 效果重新施加）。
+    int eff_crit_resist_pct[2];     // 暴击伤害抗性%（有效值）
+    int eff_fixed_resist_pct[2];    // 固定伤害抗性%（有效值）
+    int eff_percent_resist_pct[2];  // 百分比伤害抗性%（有效值）
+
     //========== 回合内状态 ==========
     bool has_attacked[2];           // 本回合是否已攻击
     bool skill_used[2];             // 本回合技能使用标记

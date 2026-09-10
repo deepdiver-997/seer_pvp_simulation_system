@@ -24,6 +24,18 @@ enum class Gender {
     NONE = 2
 };
 
+// 精灵**自身**的伤害抗性（官方三种：暴击 / 固定 / 百分比）。
+// 这是精灵的属性（抗性训练刷出来的），属于本体 → **跨切换保留**，随 pet 存活。
+// ⚠️ 与"临时 buff 修改抗性"区分：临时修改（如混元天尊死亡 buff 让己方精灵抗性
+//    被视为 100%，3 回合后恢复）写 BattleWorkspace 的**有效抗性视图**，不写本体。
+//    伤害计算一律读 ws 视图；ws 视图在回合开始 / 换宠时从本体重基。
+// 依据：docs/02-效果系统/官方机制理解与引擎缺口对照.md §一 粉伤抗性系统。
+struct DamageResist {
+    int crit_pct = 0;      // 暴击伤害抗性%（削减暴击加成部分）
+    int fixed_pct = 0;     // 固定伤害抗性%
+    int percent_pct = 0;   // 百分比伤害抗性%
+};
+
 class ElfPet {
 public:
     ElfPet() = delete;
@@ -79,6 +91,7 @@ public:
         , marks(other.marks)
         , soulmark_storage(other.soulmark_storage)
         , resistance(other.resistance)
+        , damage_resist(other.damage_resist)
         , id(other.id)
         , name(other.name) {}
 
@@ -100,6 +113,7 @@ public:
         , marks(std::move(other.marks))
         , soulmark_storage(std::move(other.soulmark_storage))
         , resistance(std::move(other.resistance))
+        , damage_resist(std::move(other.damage_resist))
         , id(other.id)
         , name(std::move(other.name)) {}
 
@@ -123,6 +137,7 @@ public:
         marks = other.marks;
         soulmark_storage = other.soulmark_storage;
         resistance = other.resistance;
+        damage_resist = other.damage_resist;
         id = other.id;
         name = other.name;
         return *this;
@@ -148,6 +163,7 @@ public:
         marks = std::move(other.marks);
         soulmark_storage = std::move(other.soulmark_storage);
         resistance = std::move(other.resistance);
+        damage_resist = std::move(other.damage_resist);
         id = other.id;
         name = std::move(other.name);
         return *this;
@@ -161,6 +177,7 @@ public:
     SoulMark soulMark;
     CommonTrait commonTrait;
     ResistanceSystem resistance;  // 异常抗性（训练刷出的概率抵抗；apply_anomaly 在魂免前 roll）
+    DamageResist damage_resist;   // 本体伤害抗性（暴击/固定/百分比；跨切换保留，计算走 ws 视图）
     numerical_properties numericalBase, numericalProperties;
     int& hp = numericalProperties[NumericalPropertyIndex::HP];
     std::array<int, 6> levels{};

@@ -205,6 +205,10 @@ void sync_workspace_from_on_stage(BattleContext* ctx) {
         std::copy(std::begin(ctx->elf_element_view[robot_id]), std::end(ctx->elf_element_view[robot_id]),
                   std::begin(ctx->ws.view_elementalAttributes[robot_id]));
         ctx->ws.cached_speed[robot_id] = pet.numericalProperties[NumericalPropertyIndex::SPEED];
+        // 伤害抗性有效视图：从**本体**（pet.damage_resist）重基。
+        // ws 每回合 reset 会清视图，故回合开始要重来一次；换宠时本函数也被调用 → 换成本体值。
+        // 临时 buff 在本回合内直接改视图（本函数不覆盖同回合内的 buff —— 它在 buff 之前跑）。
+        ctx->sync_damage_resist_view(robot_id);
     }
 }
 
@@ -272,7 +276,8 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
     if (crit_rate > 0.0f && (rand() % 1000) < static_cast<int>(crit_rate * 10.0f)) {
         const int crit_mult = ctx->ws.cached_crit_damage[attacker_id];  // 默认 200（2 倍）
         const int bonus = crit_mult - 100;
-        const int effective_bonus = bonus * (100 - ctx->crit_resist_pct[defender_id]) / 100;
+        // 读 ws 有效视图（临时 buff 可修改暴击抗性）；基线由 sync_damage_resist_view 重基。
+        const int effective_bonus = bonus * (100 - ctx->ws.eff_crit_resist_pct[defender_id]) / 100;
         snapshot.base = snapshot.base * (100 + effective_bonus) / 100;
         snapshot.isCrit = true;
     }
