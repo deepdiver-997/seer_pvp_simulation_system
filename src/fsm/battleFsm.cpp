@@ -82,24 +82,28 @@ int resolve_selected_skill_index(const BattleContext* ctx, int robot_id) {
     return (skill_index >= 0 && skill_index < 5) ? skill_index : -1;
 }
 
-// 本次**执行**使用的技能对象 —— 考虑技能替换（ws.skill_effect_source_slot）。
+// 本次**执行**使用的技能对象 —— 考虑技能替换（ws.skill_effect_source 描述符）。
 //
 // 约定（docs/02-效果系统/技能判定流程与无效效果体系.md §七）：
 //   - "执行什么技能"的读取（effectBranches / 威力视图 / 系别视图 / 暴击率 / 伤害公式）
 //     一律走本函数 → 替换生效；
-//   - "玩家点了哪一格"的读取（PP 扣除 / selection_effects_ 固有效果）走
-//     resolve_selected_skill_index → 替换**不**生效（这正是"艾欧丽娅式替换不影响固有效果"）。
-// 返回 nullptr = 无可用技能。
+//   - "玩家点了哪一格"的读取（PP 扣除）走 resolve_selected_skill_index → 替换**不**生效；
+//   - selection_effects_（先制等固有效果）：kExecOnly 走原槽位（艾欧丽娅式，固有效果保留）；
+//     kFull 走替换技能（米修莉式，"失去天生先制"，见 handle_OperationChooseSkillMedicament）。
+// 返回 nullptr = 无可用技能。不拷贝技能对象——只重定向取用点。
 Skills* resolve_executing_skill(BattleContext* ctx, int robot_id) {
     const int chosen = resolve_selected_skill_index(ctx, robot_id);
     if (chosen < 0) {
         return nullptr;
     }
-    ElfPet& pet = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]];
-    const int source = ctx->ws.skill_effect_source_slot[robot_id];
-    if (source >= 0 && source < 5) {
-        return &pet.skills[source];  // 技能替换：效果取自替补技能
+    const BattleWorkspace::SkillReplaceSource& src = ctx->ws.skill_effect_source[robot_id];
+    if (src.active && src.slot >= 0 && src.slot < 5 && src.source_owner >= 0 && src.source_owner <= 1) {
+        // 技能替换：效果取自 source_owner 方**场上**精灵的替换槽位
+        // （跨精灵替换：艾欧丽娅把对手下次技能替换成自己的第五技能时，source_owner=施放方）
+        ElfPet& source_pet = ctx->seerRobot[src.source_owner].elfPets[ctx->on_stage[src.source_owner]];
+        return &source_pet.skills[src.slot];
     }
+    ElfPet& pet = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]];
     return &pet.skills[chosen];
 }
 
@@ -776,10 +780,21 @@ void BattleFsm::handle_OperationChooseSkillMedicament(BattleContext* battleConte
         // 选择期生命周期：技能可选 → 注册先制等即时效果
         if (static_cast<ActionType>(buf[1]) == ActionType::SELECT_SKILL) {
             ElfPet& pet = battleContext->seerRobot[actor].elfPets[battleContext->on_stage[actor]];
-            Skills& skill = pet.skills[buf[2]];
-            const SkillSelectionResult sel = skill.query_selectable(battleContext, actor);
+            Skills& clicked = pet.skills[buf[2]];
+            // 可选性检查（PP/锁定）走玩家点选的原技能——玩家用自己的 PP 做选择。
+            const SkillSelectionResult sel = clicked.query_selectable(battleContext, actor);
             if (sel == SkillSelectionResult::SELECTABLE) {
-                skill.on_selected(battleContext, actor);
+                // selection_effects_（先制等固有效果）的注册目标：
+                //   默认 = 原技能（艾欧丽娅式 kExecOnly 只换执行期效果，固有效果保留）；
+                //   kFull（米修莉式）= 替换技能——描述符须在操作提交前由替换效果置位，
+                //   原技能的固有先制根本不注册（"失去天生先制"）。PP 仍扣原槽位。
+                const BattleWorkspace::SkillReplaceSource& src =
+                    battleContext->ws.skill_effect_source[actor];
+                Skills& selection_target =
+                    (src.active && src.level == BattleWorkspace::SkillReplaceSource::ReplaceLevel::kFull)
+                        ? *resolve_executing_skill(battleContext, actor)
+                        : clicked;
+                selection_target.on_selected(battleContext, actor);
             } else {
                 // 不可选（PP 耗尽/锁定）：拒绝该操作，要求重选
                 battleContext->control_block_->async_write(
