@@ -123,6 +123,13 @@ public:
     bool ignore_pp[2]{};             // 魂印激活：PP=0 技能仍可选（不受PP限制）
     bool pp_reverse[2]{};            // 魂印激活：使用技能后 PP 反转（当前PP与已损失互换，无为觉者 2260）这个我在想要不要从context移除因为无为觉者完全可以注册一个监控在双方技能使用完之后检测自己刚刚是否成功出手，是的话就直接去pet槽改pp值
 
+    //--- 技能替换 pending（kFull 载体：米修莉式"下次技能转化为X"，见 SkillReplaceSource 注释）---
+    // 住 context 不住 ws：kFull 须跨越"选择期(on_selected) → ROUND_START(reset) → 执行期"，
+    // ws 载体会被中途清掉。生命周期：用后即耗（resolve_skill_execution 结算完消费）；
+    // 换宠即清（invalidate_on_stage_effects，"印记绑定对手，下场不保留"）。
+    // 消费方：on_selected 重定向（剥夺原技能固有先制）+ resolve_executing_skill（执行替换技能）。
+    SkillReplaceSource pending_skill_replacement[2];
+
     //--- 精灵系别半持久化视图（当前在场精灵有效系别）---
     // 改系别效果（属性反转/龙琰类）写这里，跨回合保留（ws 每回合 reset 会清，故放 context）。
     // bound_slot 记录已绑定的精灵槽：sync_workspace_from_on_stage 在槽变化时从
@@ -358,6 +365,7 @@ public:
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
+        pending_skill_replacement[owner] = SkillReplaceSource{};  // 米修莉式转换不继承（"下场不保留"）
         // 技能无效条目：清掉**下场精灵**（当前 on_stage）注册的 SELF 绑定条目；
         // TEAM 绑定保留（队伍被动，切换不丢）。注意此处 on_stage 尚未更新 → 正是下场槽。
         skill_invalid_center_.clear_self_for_slot(owner, on_stage[owner]);
@@ -401,6 +409,8 @@ public:
         anomaly_conversion[1].clear();
         block_offstage_to_onstage = false;   // 场下源抑制场域（2513）战斗结束清
         death_notified[0] = death_notified[1] = false;
+        pending_skill_replacement[0] = SkillReplaceSource{};
+        pending_skill_replacement[1] = SkillReplaceSource{};
         elf_element_view_bound_slot[0] = elf_element_view_bound_slot[1] = -1;
         for (int p = 0; p < 2; ++p) {
             for (ElfPet& pet : seerRobot[p].elfPets) {

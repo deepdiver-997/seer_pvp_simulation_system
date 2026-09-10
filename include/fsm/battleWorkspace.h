@@ -32,6 +32,30 @@ struct DamageSnapshot {
 };
 
 /**
+ * SkillReplaceSource - 技能替换来源（kExecOnly 载体：ws 描述符）
+ *
+ * 两级替换拆两个载体，按**生命周期**分家（docs/02-效果系统/技能判定流程与无效效果体系.md §七）：
+ * - kExecOnly（艾欧丽娅式，本结构，住在 ws.skill_effect_source）：执行期由效果注入
+ *   （ROUND_START 之后的时点），随 ws 每回合 reset 自动失效，"仅本次技能生效"是结构性保证。
+ *   只换执行期效果，PP 与 selection_effects_（先制等固有效果）仍走玩家点选的原槽位。
+ * - kFull（米修莉式，BattleContext::pending_skill_replacement，住在 context）：必须跨越
+ *   "选择期（on_selected）→ ROUND_START(reset) → 执行期（ON_SKILL_HIT）"两个阶段，ws 载体
+ *   会在中途被 reset 清掉，故住 context；用后即耗（技能结算完消费）、换宠即清
+ *   （invalidate_on_stage_effects，"印记绑定对手，下场不保留"）。kFull 同时剥夺原技能的
+ *   固有先制（on_selected 跑在替换技能上，"失去天生先制"），且一切凭证物化都晚于替换
+ *   → "没有什么东西可以避开替换技能"。
+ *
+ * ⚠️ 不要用"改写技能对象内存 + 下个时点还原"的实现：本游戏存在**跳过时点**语义
+ *    （星皇之怒），还原可能被跳过 → 替换变永久。两个载体都是"主动消费/自动失效"，
+ *    不是"还原"。
+ */
+struct SkillReplaceSource {
+    bool active = false;
+    int source_owner = 0;  // 替换技能所在方（0/1；跨精灵替换：艾欧丽娅=施放方）
+    int slot = -1;         // 替换槽位（0..4）
+};
+
+/**
  * BattleWorkspace - 回合临时数据层
  *
  * 存放本回合内需要用到的中间变量，每回合开始时重置。
@@ -120,32 +144,9 @@ struct BattleWorkspace {
     // 0 = 未物化（calculateDamage 回退 skill.power）。
     int skill_power_view[2];
 
-    //========== 技能替换：执行效果来源描述符（重定向，非物理拷贝） ==========
-    // "执行什么技能"的唯一取用点是 battleFsm.cpp 的 resolve_executing_skill（读本描述符）；
-    // active=false（默认）→ 用玩家点选的本槽位技能。技能对象**不被拷贝**——只重定向
-    // 取用点（Skills 拷贝有 parsed_units_ 悬垂地雷，物理副本进 ws 也放不下 memset 重置）。
-    //
-    // 两级替换（docs/02-效果系统/技能判定流程与无效效果体系.md §七）：
-    // - kExecOnly（艾欧丽娅式）：执行期才设（须在 ROUND_START 之后的时点）——只有
-    //   effectBranches/威力/系别/暴击/伤害公式走替换技能；PP 扣除与 selection_effects_
-    //   （先制等固有效果）仍走原槽位 → "替换不影响固有效果"是结构性保证。
-    // - kFull（米修莉式）：须在 on_selected **之前**置位（操作提交瞬间）——selection_effects_
-    //   也从替换技能注册，原技能的固有先制根本不进桶（"失去天生先制"）；PP 仍扣原槽位；
-    //   一切凭证物化都晚于替换 → "没有什么东西可以避开替换技能"。
-    //
-    // source_owner：替换技能所在的**方**（艾欧丽娅把对手下次技能替换成自己的第五技能时
-    // source_owner=施放方、slot=4；自替换时 source_owner=执行方自己）。
-    //
-    // ⚠️ 不要用"改写技能对象内存 + 下个时点还原"的实现：本游戏存在**跳过时点**语义
-    //    （星皇之怒），还原可能被跳过 → 替换变永久。本字段随 ws 每回合 reset，
-    //    "仅本次/本回合生效"是结构性保证（reset 已显式恢复默认值）。
-    struct SkillReplaceSource {
-        enum class ReplaceLevel { kExecOnly, kFull };
-        bool active = false;
-        int source_owner = 0;                    // 替换技能所在方（0/1）
-        int slot = -1;                           // 替换槽位（0..4）
-        ReplaceLevel level = ReplaceLevel::kExecOnly;
-    };
+    //========== 技能替换：kExecOnly 载体（艾欧丽娅式，见 SkillReplaceSource 注释）==========
+    // "执行什么技能"的唯一取用点是 battleFsm.cpp 的 resolve_executing_skill；
+    // active=false（默认）→ 用玩家点选的本槽位技能。技能对象不被拷贝，只重定向取用点。
     SkillReplaceSource skill_effect_source[2];
 
     //========== 技能元素/克制倍率视图层 ==========

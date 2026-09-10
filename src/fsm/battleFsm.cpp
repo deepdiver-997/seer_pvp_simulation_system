@@ -82,26 +82,42 @@ int resolve_selected_skill_index(const BattleContext* ctx, int robot_id) {
     return (skill_index >= 0 && skill_index < 5) ? skill_index : -1;
 }
 
-// 本次**执行**使用的技能对象 —— 考虑技能替换（ws.skill_effect_source 描述符）。
+// 技能替换的统一解析：kFull（context pending，米修莉式）优先于 kExecOnly（ws 描述符，
+// 艾欧丽娅式）。返回 nullptr = 无替换生效。
+// 两个载体只在"active 与槽位合法性"上判活——有效性检查收口在这一处。
+Skills* resolve_replacement_skill(BattleContext* ctx, int robot_id) {
+    const SkillReplaceSource* carriers[2] = {&ctx->pending_skill_replacement[robot_id],
+                                             &ctx->ws.skill_effect_source[robot_id]};
+    for (const SkillReplaceSource* src : carriers) {
+        if (src->active && src->slot >= 0 && src->slot < 5 && src->source_owner >= 0
+            && src->source_owner <= 1) {
+            // 替换技能取自 source_owner 方**场上**精灵（跨精灵替换：艾欧丽娅=施放方第五技能）
+            ElfPet& source_pet =
+                ctx->seerRobot[src->source_owner].elfPets[ctx->on_stage[src->source_owner]];
+            return &source_pet.skills[src->slot];
+        }
+    }
+    return nullptr;
+}
+
+// 本次**执行**使用的技能对象 —— 考虑技能替换（context pending / ws 描述符，见
+// resolve_replacement_skill）。
 //
 // 约定（docs/02-效果系统/技能判定流程与无效效果体系.md §七）：
 //   - "执行什么技能"的读取（effectBranches / 威力视图 / 系别视图 / 暴击率 / 伤害公式）
 //     一律走本函数 → 替换生效；
 //   - "玩家点了哪一格"的读取（PP 扣除）走 resolve_selected_skill_index → 替换**不**生效；
-//   - selection_effects_（先制等固有效果）：kExecOnly 走原槽位（艾欧丽娅式，固有效果保留）；
-//     kFull 走替换技能（米修莉式，"失去天生先制"，见 handle_OperationChooseSkillMedicament）。
+//   - selection_effects_（先制等固有效果）：艾欧丽娅式走原槽位（固有效果保留）；
+//     米修莉式（context pending）走替换技能（"失去天生先制"，
+//     见 handle_OperationChooseSkillMedicament）。
 // 返回 nullptr = 无可用技能。不拷贝技能对象——只重定向取用点。
 Skills* resolve_executing_skill(BattleContext* ctx, int robot_id) {
     const int chosen = resolve_selected_skill_index(ctx, robot_id);
     if (chosen < 0) {
         return nullptr;
     }
-    const BattleWorkspace::SkillReplaceSource& src = ctx->ws.skill_effect_source[robot_id];
-    if (src.active && src.slot >= 0 && src.slot < 5 && src.source_owner >= 0 && src.source_owner <= 1) {
-        // 技能替换：效果取自 source_owner 方**场上**精灵的替换槽位
-        // （跨精灵替换：艾欧丽娅把对手下次技能替换成自己的第五技能时，source_owner=施放方）
-        ElfPet& source_pet = ctx->seerRobot[src.source_owner].elfPets[ctx->on_stage[src.source_owner]];
-        return &source_pet.skills[src.slot];
+    if (Skills* replacement = resolve_replacement_skill(ctx, robot_id)) {
+        return replacement;
     }
     ElfPet& pet = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]];
     return &pet.skills[chosen];
@@ -213,6 +229,10 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
     ctx->ws.skill_element_view[robot_id][1] = skill.element[1];
     const auto [result, flags] = skill.execute(ctx, robot_id, trigger_state);
     write_skill_resolution(ctx, robot_id, result, flags);
+    // 米修莉式转换"用后即耗"：本次技能（无论命中/miss/被盔封）已按替换技能结算完毕，
+    // pending 到此消费（"对手**下次**技能转化为摸摸"——下次再触发需要重新施加印记）。
+    // 只在"真的结算了一次技能"时消费：被控/切宠跳过主流程不经过这里，转换留给下次。
+    ctx->pending_skill_replacement[robot_id] = SkillReplaceSource{};
 }
 
 void clear_damage_snapshot(DamageSnapshot& snapshot) {
@@ -785,14 +805,13 @@ void BattleFsm::handle_OperationChooseSkillMedicament(BattleContext* battleConte
             const SkillSelectionResult sel = clicked.query_selectable(battleContext, actor);
             if (sel == SkillSelectionResult::SELECTABLE) {
                 // selection_effects_（先制等固有效果）的注册目标：
-                //   默认 = 原技能（艾欧丽娅式 kExecOnly 只换执行期效果，固有效果保留）；
-                //   kFull（米修莉式）= 替换技能——描述符须在操作提交前由替换效果置位，
-                //   原技能的固有先制根本不注册（"失去天生先制"）。PP 仍扣原槽位。
-                const BattleWorkspace::SkillReplaceSource& src =
-                    battleContext->ws.skill_effect_source[actor];
+                //   默认 = 原技能（艾欧丽娅式 ws 载体不参与选择期，固有效果保留）；
+                //   米修莉式（context pending）= 替换技能——原技能的固有先制根本不注册
+                //   （"失去天生先制"）。PP 仍扣原槽位。
+                Skills* pending = resolve_replacement_skill(battleContext, actor);
                 Skills& selection_target =
-                    (src.active && src.level == BattleWorkspace::SkillReplaceSource::ReplaceLevel::kFull)
-                        ? *resolve_executing_skill(battleContext, actor)
+                    (battleContext->pending_skill_replacement[actor].active && pending)
+                        ? *pending
                         : clicked;
                 selection_target.on_selected(battleContext, actor);
             } else {
