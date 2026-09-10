@@ -102,11 +102,8 @@ public:
         bool seal_attack = false;     // 封锁攻击技能（category=1/2）
         bool penetrable = true;   // 可否被"无视攻击免疫"穿透：false=条件盔/龙威，恒被挡
         int  armor_level = 0;     // 盔等级：0=可穿盔, 1=条件盔, 2=龙威（本轮只存不比较）
-        // 免断：该回合型拦截**不被断回合清除**。
-        // 官方依据（reference idx=473）：魂印回合龙威 / 魂印伪龙威均为"不可断"；
-        // 对照：技能回合真龙威"会被魂印消回合"。故这是**单个 seal 的属性**，
-        // 与 owner 级的 ImmunityType::BREAK（我整方免断）是两回事，两者都要查。
-        bool unbreakable = false;
+        // 注："免断"**不在这里**——免断 = ImmunityType::BREAK（免疫内核，per-owner）。
+        //     见 docs/02-效果系统/技能判定流程与无效效果体系.md §二（狮盔 vs 龙威）+ 免疫内核设计。
         // 后期要不要也做成位图避免枚举膨胀？
     };
     std::vector<SkillSeal> skill_seals[2];  // [被拦截方]

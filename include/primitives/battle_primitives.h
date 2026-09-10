@@ -129,12 +129,12 @@ void deal_damage(BattleContext* ctx, int target, int amount,
  * @param count          次数型拦截次数（>0）
  * @param duration_rounds 回合型持续回合（>0 走回合型；0=次数型）
  * @param penetrable     可否被"无视攻击免疫"穿透（默认 true=可穿盔；false=条件盔/龙威）
- * @param unbreakable    免断：回合型不被断回合清除（官方：魂印回合龙威/魂印伪龙威不可断；
- *                       技能回合真龙威可被消回合）。仅对回合型有意义。
+ *
+ * 注：拦截**没有**"免断"属性——免断是 owner 级的 `ImmunityType::BREAK`（免疫内核），
+ *     由 `break_round_effects` 在入口统一查询，见技能判定流程与无效效果体系.md §二。
  */
 void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
-                int count, int duration_rounds = 0, bool penetrable = true,
-                bool unbreakable = false);
+                int count, int duration_rounds = 0, bool penetrable = true);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。
