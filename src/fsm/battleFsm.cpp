@@ -82,6 +82,27 @@ int resolve_selected_skill_index(const BattleContext* ctx, int robot_id) {
     return (skill_index >= 0 && skill_index < 5) ? skill_index : -1;
 }
 
+// 本次**执行**使用的技能对象 —— 考虑技能替换（ws.skill_effect_source_slot）。
+//
+// 约定（docs/02-效果系统/技能判定流程与无效效果体系.md §七）：
+//   - "执行什么技能"的读取（effectBranches / 威力视图 / 系别视图 / 暴击率 / 伤害公式）
+//     一律走本函数 → 替换生效；
+//   - "玩家点了哪一格"的读取（PP 扣除 / selection_effects_ 固有效果）走
+//     resolve_selected_skill_index → 替换**不**生效（这正是"艾欧丽娅式替换不影响固有效果"）。
+// 返回 nullptr = 无可用技能。
+Skills* resolve_executing_skill(BattleContext* ctx, int robot_id) {
+    const int chosen = resolve_selected_skill_index(ctx, robot_id);
+    if (chosen < 0) {
+        return nullptr;
+    }
+    ElfPet& pet = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]];
+    const int source = ctx->ws.skill_effect_source_slot[robot_id];
+    if (source >= 0 && source < 5) {
+        return &pet.skills[source];  // 技能替换：效果取自替补技能
+    }
+    return &pet.skills[chosen];
+}
+
 bool should_skip_action_flow(const BattleContext* ctx, int robot_id) {
     if (!ctx || robot_id < 0 || robot_id > 1) {
         return true;
@@ -171,7 +192,15 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
         return;
     }
 
-    Skills& skill = ctx->seerRobot[robot_id].elfPets[ctx->on_stage[robot_id]].skills[skill_index];
+    // 技能替换（如艾欧丽娅"骑士对决"）：执行用的技能对象可能指向替补技能，
+    // 但 player 点的槽位（skill_index）不变 —— PP 扣除与 selection_effects_（先制等固有效果）
+    // 仍走原槽位。见技能解析流程与无效效果体系.md §七。
+    Skills* executing = resolve_executing_skill(ctx, robot_id);
+    if (!executing) {
+        write_skill_resolution(ctx, robot_id, SkillExecResult::SKILL_INVALID, SkillResolutionFlags{false, false});
+        return;
+    }
+    Skills& skill = *executing;
     // 技能威力视图层：本次攻击的威力打底物化到 ws，效果（SKILL_EFFECT 时点）可改，
     // ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值（见 battleWorkspace.h）。
     ctx->ws.skill_power_view[robot_id] = skill.power;
@@ -263,7 +292,13 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
         return;
     }
 
-    const Skills& skill = ctx->seerRobot[attacker_id].elfPets[ctx->on_stage[attacker_id]].skills[skill_index];
+    // 考虑技能替换：伤害公式/暴击率等"执行什么技能"的读取走执行用技能对象
+    // （威力/系别另有 ws 视图层，也由 resolve_skill_execution 按同一来源物化）。
+    const Skills* executing = resolve_executing_skill(ctx, attacker_id);
+    if (!executing) {
+        return;
+    }
+    const Skills& skill = *executing;
     DamageSnapshot snapshot;
     snapshot.attackerId = attacker_id;
     snapshot.defenderId = defender_id;

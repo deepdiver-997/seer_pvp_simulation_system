@@ -120,6 +120,20 @@ struct BattleWorkspace {
     // 0 = 未物化（calculateDamage 回退 skill.power）。
     int skill_power_view[2];
 
+    //========== 技能替换：执行期效果来源槽位 ==========
+    // -1 = 用**本槽位**技能的效果（默认，无替换）；>=0 = 用**该槽位**技能的 effectBranches。
+    //
+    // 用途：技能替换（如星光·艾欧丽娅"骑士对决"把下次技能转化为第五技能）。
+    // 只影响"执行什么效果"——PP 扣除与 selection_effects_（先制等固有效果）仍走
+    // 玩家点击的原槽位（roundChoice[owner][1]），故"艾欧丽娅式替换不影响固有效果"是天然的。
+    //
+    // ⚠️ 不要用"改写技能对象内存 + 下个时点还原"的实现：本游戏存在**跳过时点**语义
+    //    （星皇之怒"体力归0的对手无法触发任何效果"），还原可能被跳过 → 替换变永久。
+    //    本字段随 ws 每回合 reset，故"仅本次技能生效"是结构性保证。
+    //    详见 docs/02-效果系统/技能判定流程与无效效果体系.md §七。
+    // reset 须显式恢复 -1（memset 会清成 0）。
+    int skill_effect_source_slot[2];
+
     //========== 技能元素/克制倍率视图层 ==========
     // 攻击结算视角的技能系别：默认物化 skill.element，效果可改
     // （"以XX系别计算克制倍数"类效果写这里）。克制倍率计算用它 vs 防御方元素；
@@ -154,6 +168,7 @@ struct BattleWorkspace {
             skill_resolution_flags[i] = SkillResolutionFlags{false, false};
             skill_pp_cost_multiplier[i] = 1;
             restraint_view[i] = -1.0;  // 未设置 → 按元素计算
+            skill_effect_source_slot[i] = -1;  // 未替换 → 用本槽位技能的效果
         }
     }
     int getTempAbilityValue(int owner, NumericalPropertyIndex i) const {
