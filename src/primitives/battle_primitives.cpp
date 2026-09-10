@@ -186,19 +186,15 @@ BreakResult break_round_effects(BattleContext* ctx, int target) {
     }
 
     // 对手没有可清除的回合类效果 → 清除失败（无事发生），不 emit。
-    // 回合型技能拦截（remaining_rounds>0）也算回合类效果（可被断清除）。
-    auto& seals = ctx->skill_seals[target];
-    const bool has_round_seal = std::any_of(
-        seals.begin(), seals.end(),
-        [](const BattleContext::SkillSeal& s) { return s.remaining_rounds > 0; });
-    if (!ctx->has_round_effects(target) && !has_round_seal) {
+    // 回合类盔/威/封属也算回合类效果（可被断清除）。
+    if (!ctx->has_round_effects(target) && !ctx->skill_invalid_center_.has_round_type(target)) {
         return BreakResult::NO_EFFECTS;
     }
 
     // 成功：机械无效化 + 事件（补偿 watcher 在 FSM drain 点投递）
     ctx->invalidate_all_round_effects(target);
-    // 断回合清回合型技能拦截（次数型 remaining>0 保留）
-    std::erase_if(seals, [](const BattleContext::SkillSeal& s) { return s.remaining_rounds > 0; });
+    // 断回合清回合类盔/威/封属（次数类保留）
+    ctx->skill_invalid_center_.clear_round_type(target);
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_BREAK, ctx->opponent(target), target});
     return BreakResult::SUCCESS;
 }
@@ -290,28 +286,30 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 }
 
 void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
-                int count, int duration_rounds, bool penetrable) {
+                int count, int duration_rounds, bool penetrable, int source_slot,
+                InvalidBinding binding) {
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
     if (!attribute && !attack) {
         return;
     }
-    auto& seals = ctx->skill_seals[target];
-    // 覆盖去重：同 effect_id 覆盖刷新（仿技能效果桶同 effect 覆盖）。
-    for (auto& s : seals) {
-        if (s.effect_id == effect_id) {
-            s.remaining = count;
-            s.remaining_rounds = duration_rounds;
-            s.seal_attribute = attribute;
-            s.seal_attack = attack;
-            s.penetrable = penetrable;
-            return;
-        }
+
+    SkillArmor armor;
+    armor.kind = (attribute && attack) ? SkillArmor::Kind::SEAL_ALL
+               : (attack ? SkillArmor::Kind::SEAL_ATTACK : SkillArmor::Kind::SEAL_ATTRIBUTE);
+    armor.penetrable = penetrable;
+    armor.source_effect_id = effect_id;
+    // 回合型 / 次数型二选一（文档 §5.1）：有 duration 走回合型（响应不消耗，靠减扣点/断回合结束），
+    // 否则走次数型（响应即减，减到 0 注销）。
+    if (duration_rounds > 0) {
+        armor.remaining_rounds = duration_rounds;
+    } else {
+        armor.remaining_counts = count;
     }
-    seals.push_back(BattleContext::SkillSeal{
-        target, effect_id, count, duration_rounds, attribute, attack, penetrable, /*armor_level=*/0,
-    });
+
+    // 同 (owner, source_slot, source_effect_id, kind) → 覆盖刷新（不累加），见中心头注释。
+    ctx->skill_invalid_center_.register_armor(target, source_slot, armor, binding);
 }
 
 void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,

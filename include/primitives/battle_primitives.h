@@ -2,6 +2,7 @@
 #define BATTLE_PRIMITIVES_H
 
 #include <effects/effect.h>
+#include <effects/skill_invalid_center.h>
 
 class BattleContext;
 
@@ -134,7 +135,8 @@ void deal_damage(BattleContext* ctx, int target, int amount,
  *     由 `break_round_effects` 在入口统一查询，见技能判定流程与无效效果体系.md §二。
  */
 void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
-                int count, int duration_rounds = 0, bool penetrable = true);
+                int count, int duration_rounds = 0, bool penetrable = true,
+                int source_slot = -1, InvalidBinding binding = InvalidBinding::SELF);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。

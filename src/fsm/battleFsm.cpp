@@ -1126,17 +1126,8 @@ void BattleFsm::handle_BattleRoundReductionAllRoundMinus(BattleContext* battleCo
     log("Battle: Round Reduction All Round Minus.");
     // 先执行注册在本时点的效果（包括断回合效果本身）
     battleContext->execute_registered_actions(-1, State::BATTLE_ROUND_REDUCTION_ALL_ROUND_MINUS);
-    // 回合型技能拦截（remaining_rounds>0）每回合递减，到 0 移除
-    for (int p = 0; p < 2; ++p) {
-        auto& seals = battleContext->skill_seals[p];
-        std::erase_if(seals, [](BattleContext::SkillSeal& s) {
-            if (s.remaining_rounds > 0) {
-                --s.remaining_rounds;
-                return s.remaining_rounds <= 0;
-            }
-            return false;
-        });
-    }
+    // 回合型盔/威/封属每回合递减，到 0 注销（次数型不动）
+    battleContext->skill_invalid_center_.tick_rounds();
     // 然后统一清理所有已过期的回合类效果
     battleContext->cleanup_expired_effects();
     battleContext->generateState();

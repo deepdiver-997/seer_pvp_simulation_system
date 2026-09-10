@@ -364,33 +364,26 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         const float dodge_chance = ctx->ws.dodge_rate[1 - owner];
         const int hit_chance = accuracy - static_cast<int>(dodge_chance * 100);
         if ((std::rand() % 100) >= hit_chance) {
+            // miss 也照常 notify 中心：文档 §2.3「一旦本次技能命中失败（miss 类），
+            // 会消耗所有可响应的次数类效果」——狮盔会被响应并消耗，尽管技能是 miss 的。
+            ctx->skill_invalid_center_.notify(
+                ctx, owner, owner, type == SkillType::Attribute, this->power,
+                ctx->ws.attack_credential[owner].ignore_attack_immunity);
             return SkillUsageResult::MISS;
         }
     }
 
-    // ② 门判定（拦截桶：封属性/封攻击）。检查自己桶里"针对自己"（target==owner）的条目。
-    // 穿透只绕"封攻击"的可穿盔（seal_attack && penetrable）：封属性不被 699 穿透；
-    // 条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。miss 已在 ① 提前 return。
-    // 次数型（remaining>0）命中消费一次；回合型（remaining_rounds>0）命中不消费。
-    auto& seals = ctx->skill_seals[owner];
-    for (auto it = seals.begin(); it != seals.end(); ++it) {
-        if (it->target != owner) {
-            continue;  // 防御：桶里非针对本方的条目（显式 target 过滤）
-        }
-        const bool is_attribute = (type == SkillType::Attribute);
-        const bool matches = is_attribute ? it->seal_attribute : it->seal_attack;
-        if (!matches) {
-            continue;
-        }
-        if (it->penetrable && ctx->ws.attack_credential[owner].ignore_attack_immunity) {
-            continue;  // 可穿盔被穿透 → 保留次数（文档 5.2），继续看下一条
-        }
-        if (it->remaining > 0) {
-            --it->remaining;
-            if (it->remaining <= 0) {
-                seals.erase(it);
-            }
-        }
+    // ② 门判定（技能无效中心：盔 / 威 / 封属）。
+    // 文档 §2.3/§5.2 **全部消费**：一次技能使用会消耗**所有**响应它的次数类条目，
+    // 不因某个盔挡了另一个就保留次数。回合类条目响应但不消耗（靠减扣点/断回合结束）。
+    // 穿透只绕"可穿盔"：条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。
+    // 注：miss 分支已在 ① 提前 return —— 但那里**也要** notify（miss 同样消费可响应的次数类），
+    //     见下方 ① 的改动。
+    const bool is_attribute = (type == SkillType::Attribute);
+    const bool responded = ctx->skill_invalid_center_.notify(
+        ctx, owner, owner, is_attribute, this->power,
+        ctx->ws.attack_credential[owner].ignore_attack_immunity);
+    if (responded) {
         return SkillUsageResult::SEALED;
     }
 

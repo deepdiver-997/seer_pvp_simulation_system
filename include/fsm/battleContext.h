@@ -18,6 +18,7 @@
 #include <effects/continuousEffect.h>
 #include <effects/pendingEffect.h>
 #include <effects/timed_bucket.h>
+#include <effects/skill_invalid_center.h>
 #include <effects/event_center.h>
 #include <effects/immunity_center.h>
 #include <effects/damage_pipeline.h>
@@ -84,30 +85,16 @@ public:
     // 类别抑制（damage_suppress_mask）按效果类别跳过被抑制方的伤害效果。
     DamagePipeline damage_pipeline_;
 
-    //--- 技能拦截桶（封属性/封攻击）---
-    // 拦截效果挂到**被拦截方**的桶里（施放方切换不影响它；被拦截方切换时
-    // invalidate_on_stage_effects 清自己桶 → 换宠可洗掉封属性）。
-    // 按被拦截方 owner 索引；每条显式带 target（不靠"在哪个桶"推断）。
-    // 次数型（remaining>0）命中消费；回合型（remaining_rounds>0）每回合递减、可被断回合。
-    // 加一个免断回合的属性，然后断回合原语需要查询对面有没有免断决定返回结果 然后你说这个要不要也做成一个容器，因为seals都是被动的而且消耗最大化，就像我说的
-    // 身上有次数龙威和封属回合类效果，对手使用属性技能，龙威一样会被响应然后消耗，做成一个容器就不用自己写触发同类型的了，所有可以响应的都会消耗
-    // 而且这个做出来可能还可以给次数免疫实现使用：次数免疫是一种次数类效果不会过期，但是次免也分为可传承和不可传承的两种，不可传承的在自己切换时就会被清除，反之则不会。
-    // 不过次免到底会不会在有回合类免疫的情况下消耗你需要去reference/ 找一下相关文章说明了
-    struct SkillSeal {
-        int target = -1;          // 封锁对象（被拦截方），显式
-        int effect_id = -1;       // 来源效果 id：覆盖去重 key（同效果覆盖刷新）
-        int remaining = 0;        // 次数型剩余次数（>0 命中消费）
-        int remaining_rounds = 0; // 回合型剩余回合（>0 每回合递减；0=次数型）
-        bool seal_attribute = false;  // 封锁属性技能（category=4）
-        bool seal_attack = false;     // 封锁攻击技能（category=1/2）
-        bool penetrable = true;   // 可否被"无视攻击免疫"穿透：false=条件盔/龙威，恒被挡
-        int  armor_level = 0;     // 盔等级：0=可穿盔, 1=条件盔, 2=龙威（本轮只存不比较）
-        // 注："免断"**不在这里**——免断 = ImmunityType::BREAK（免疫内核，per-owner）。
-        //     见 docs/02-效果系统/技能判定流程与无效效果体系.md §二（狮盔 vs 龙威）+ 免疫内核设计。
-        // 后期要不要也做成位图避免枚举膨胀？
-    };
-    std::vector<SkillSeal> skill_seals[2];  // [被拦截方]
-    // 拦截桶确实不能和之前做的timed_bucket混用，因为这个是要别人来查询的，自己不会主动执行到期对象
+    //--- 技能无效中心（盔 / 威 / 封属）---
+    // 结构见 effects/skill_invalid_center.h；权威口径见
+    // docs/02-效果系统/技能判定流程与无效效果体系.md §5.1-5.4。
+    //
+    // 为什么不并入 TimedBucket：TimedBucket 是"到点执行**自己**"，而盔/威是
+    // "**被别人查询**并消费"，自己不主动到时点执行——两类生命周期不同。
+    //
+    // 换宠清理：SELF 绑定按 source_slot 清理（invalidate_on_stage_effects）；
+    //          TEAM 绑定切换保留。
+    SkillInvalidCenter skill_invalid_center_;
 
     //--- 命中效果失效桶（③层：命中但效果不注册；白板=伤害归0/保留伤害=伤害照常）---
     // 挂在防御方上：其技能命中时命中效果被失效。mode 见 effect.h HitInvalidMode。
@@ -357,7 +344,12 @@ public:
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
-        skill_seals[owner].clear();  // 拦截挂在被拦截方桶：换宠洗掉自己身上的封属性
+        // 技能无效条目：清掉**下场精灵**（当前 on_stage）注册的 SELF 绑定条目；
+        // TEAM 绑定保留（队伍被动，切换不丢）。注意此处 on_stage 尚未更新 → 正是下场槽。
+        skill_invalid_center_.clear_self_for_slot(owner, on_stage[owner]);
+        // 免疫源：清掉 ON_STAGE 绑定的（天生免疫/回合类免断/次免都属于在场精灵）；
+        // TEAM 绑定保留（可传承次免等）。新精灵登场时由魂印/技能重新 grant。
+        immunity_center_.clear_on_stage(owner);
         pink_immune[owner] = false;          // 临时粉伤状态不继承给新精灵
         // 注：伤害抗性本体在 pet 上（跨切换保留），不在此清；ws 有效视图由
         //     调用方的 sync_workspace_from_on_stage → sync_damage_resist_view 从新精灵重基。
@@ -374,6 +366,7 @@ public:
         skills_effects.clear();
         soul_mark_effects.clear();
         updater_effects.clear();
+        skill_invalid_center_.clear();
         pending_effects.clear();
         penetration_grants[0].clear();
         penetration_grants[1].clear();
@@ -464,9 +457,10 @@ public:
      */
     int grant_immunity(int owner, ImmunityType type, uint64_t coverage,
                        uint64_t anomaly_mask = 0, int duration_rounds = 0, int source_id = 0,
-                       bool soul_immunity = false) {
+                       bool soul_immunity = false,
+                       EffectScope scope = EffectScope::ON_STAGE) {
         return immunity_center_.grant(owner, type, coverage, anomaly_mask,
-                                      duration_rounds, roundCount, source_id, soul_immunity);
+                                      duration_rounds, roundCount, source_id, soul_immunity, scope);
     }
 
     void revoke_immunity(int owner, int source_id) {

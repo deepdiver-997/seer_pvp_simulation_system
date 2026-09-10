@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cstdint>
+
+#include <effects/continuousEffect.h>  // EffectScope（ON_STAGE/TEAM 绑定语义）
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +49,11 @@ struct ImmunityProvider {
     int condition_id;       // 预留：条件目录枚举，-1 = 无条件（live 条件后续迭代）
     int source_id;          // 授予句柄，revoke / 复用更新用
     bool soul = false;      // true=魂免（抗性优先判定后才查）；false=次免/回合类免疫效果（先于抗性挡）
+    // 绑定方（与 SkillArmor 的 InvalidBinding 同义，复用代码库既有的 EffectScope 词汇）：
+    //   ON_STAGE = 绑定当前在场精灵：下场时清除（天生免疫 / 效果授予的回合类免断/次免）
+    //   TEAM     = 绑定全队：切换保留，继承给下一只（如可视化次免"下场保留"，reference idx=375/62）
+    // 默认 ON_STAGE：免疫系统属于在场精灵，上场时注册、下场时清。
+    EffectScope scope = EffectScope::ON_STAGE;
 };
 
 /**
@@ -79,7 +86,7 @@ public:
      */
     int grant(int owner, ImmunityType type, uint64_t coverage, uint64_t anomaly_mask,
               int duration_rounds, int register_round, int source_id = 0,
-              bool soul = false) {
+              bool soul = false, EffectScope scope = EffectScope::ON_STAGE) {
         const int sid = (source_id != 0) ? source_id : next_source_id_++;
         auto& list = providers_[owner];
         for (auto& p : list) {
@@ -93,11 +100,12 @@ public:
                 p.active = true;
                 p.condition_id = -1;
                 p.soul = soul;
+                p.scope = scope;
                 return sid;
             }
         }
         list.push_back(ImmunityProvider{owner, type, register_round, duration_rounds,
-                                        coverage, anomaly_mask, true, -1, sid, soul});
+                                        coverage, anomaly_mask, true, -1, sid, soul, scope});
         return sid;
     }
 
@@ -174,6 +182,19 @@ public:
                 ++it;
             }
         }
+    }
+
+    // 切换精灵：清掉该方 ON_STAGE 绑定的免疫源（TEAM 的保留）。
+    // 天生免疫/效果授予的回合类免断都属此列——它们属于在场精灵。
+    void clear_on_stage(int owner) {
+        auto it = providers_.find(owner);
+        if (it == providers_.end()) {
+            return;
+        }
+        auto& list = it->second;
+        std::erase_if(list, [](const ImmunityProvider& p) {
+            return p.scope == EffectScope::ON_STAGE;
+        });
     }
 
     void clear_all() {
