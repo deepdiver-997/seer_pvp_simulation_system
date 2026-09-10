@@ -143,6 +143,20 @@ public:
     bool reflect_anomaly[2]{};                        // 弹控：免疫异常时反弹给施放方（最多反弹 1 次防打乒乓球）
     std::array<std::map<int, int>, 2> anomaly_conversion;  // [目标] 入异常 id → 出异常 id（单跳转换）
 
+    //--- 场下源抑制场域（薇尔诗 2513，双方通用）---
+    // "自身存活于出战阵容时，双方场下的精灵无法指定场上精灵为效果对象"（effect_icon 2098）。
+    // 不分敌我——薇尔诗在任一方存活即全场生效（档案 §4.2.3 定：context 全局，非 per-owner）。
+    // 生命周期：由 2513 的魂印程序在战斗开始置 true；宿主阵亡后由**战斗开始注册的死亡监控**
+    // （EVENT_DEATH watcher，独立于魂印开闭路径，档案 §4.3）清 false——不能用 on_exit 清，
+    // ROSTER 魂印切换离场不清（存活于背包仍生效），死亡路径又会被"跳过时点"类效果（星皇之怒）跳掉。
+    // 消费方：各"场下源 → 场上目标"效果入口统一查（星皇 903 之赐/之佑的统一门，档案 §4.2.4）。
+    bool block_offstage_to_onstage = false;
+
+    //--- EVENT_DEATH 已通知标记 ---
+    // 死亡事件收敛在 BATTLE_AFTER_DEFEATED（线性序每回合必经）；on-stage 死亡方在此 emit。
+    // 每方一次（防止极端同回合双死后 replace 流程重复通知亡语类 watcher）；换宠时复位。
+    bool death_notified[2]{};
+
     //--- 技能效果执行表 ---
     // TimedBucket 封装：注册/同源去重/时点执行/过期清理/epoch 作废/回合计数（见 effects/timed_bucket.h）。
     // 内层 key = (source_id << 32) | effect_id，同源同 effect 新注册自动覆盖旧。
@@ -385,6 +399,8 @@ public:
         reflect_anomaly[0] = reflect_anomaly[1] = false;
         anomaly_conversion[0].clear();
         anomaly_conversion[1].clear();
+        block_offstage_to_onstage = false;   // 场下源抑制场域（2513）战斗结束清
+        death_notified[0] = death_notified[1] = false;
         elf_element_view_bound_slot[0] = elf_element_view_bound_slot[1] = -1;
         for (int p = 0; p < 2; ++p) {
             for (ElfPet& pet : seerRobot[p].elfPets) {

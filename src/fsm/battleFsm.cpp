@@ -263,6 +263,8 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     ctx->clear_on_stage_abnormal_statuses(robot_id);
     // ③ 更新在场槽位
     ctx->on_stage[robot_id] = target_slot;
+    // ③' 新精灵登场：死亡通知标记复位（同一方后续新死亡要重新通知亡语类 watcher）
+    ctx->death_notified[robot_id] = false;
     // ④ 新精灵魂印激活（登场：STAGE 节点注册 + early 信号 + on_enter 钩子）+ 登记更新器
     {
         ElfPet& new_pet = ctx->getPet(robot_id);
@@ -1216,6 +1218,19 @@ void BattleFsm::handle_BattleAfterDefeated(BattleContext* battleContext) {
 
     const bool dead0 = battleContext->seerRobot[0].elfPets[battleContext->on_stage[0]].hp <= 0;
     const bool dead1 = battleContext->seerRobot[1].elfPets[battleContext->on_stage[1]].hp <= 0;
+
+    // 死亡事件收敛点：线性序每回合必经此处，on-stage 精灵死亡在此统一 emit EVENT_DEATH
+    // （杀手信息不携带，actor=target=死亡方）。供"战斗开始注册的死亡监控"类 watcher 使用
+    //（如薇尔诗 2513 场域的死后清除——必须独立于魂印开闭路径，见魂印档案 §4.3）。
+    // 每方只发一次；死宠在 CHOOSE_AFTER_DEATH 被强制替换（perform_switch 复位标记），
+    // 故正常流程下一只宠只通知一次。
+    for (int side = 0; side < 2; ++side) {
+        const bool dead = (side == 0) ? dead0 : dead1;
+        if (dead && !battleContext->death_notified[side]) {
+            battleContext->death_notified[side] = true;
+            battleContext->event_center_.emit(BattleEvent{EventType::EVENT_DEATH, side, side, 0});
+        }
+    }
 
     if (!dead0 && !dead1) {
         battleContext->currentState = State::BATTLE_AFTER_DEFEATING_OPPONENT;
