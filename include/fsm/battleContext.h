@@ -468,6 +468,32 @@ public:
     ElfPet& getPet(int robotId) { return seerRobot[robotId].elfPets[on_stage[robotId]]; }
     int opponent(int robotId) const { return 1 - robotId; }
 
+    //--- 魂印源查询（源空间判定）---
+    // 在 owner 方 6 个精灵槽中查找"携带指定魂印 id 且存活"的精灵，返回槽位；未找到返回 -1。
+    //
+    // 用途（见 docs/02-效果系统/魂印机制设计与精灵表现档案.md §4）：
+    //   效果执行时判定"我（源精灵）此刻在场上还是场下"——
+    //     find_pet_with_soulmark(owner, id) == on_stage[owner]  → 源在场上
+    //     不等（或返回 -1=该精灵已死）                          → 源在出战背包/已阵亡
+    //   典型场景：薇尔诗 2513 场域抑制"场下源 → 场上目标"；瀚宇星皇 903 判"星皇是否场下"。
+    //
+    // 前提：每方同魂印注册唯一（单边同 ID 精灵只能带一只，且同名魂印效果不叠加），
+    //       故不存在多槽命中歧义（档案 §1）。
+    // 注：inline 成员，供插件（moves_lib/soul_lib 不链接 sim_core，CLAUDE.md 3.9）直接调用。
+    // 注：只认存活精灵——各子句普遍写作"自身存活于出战阵容时"，阵亡（hp<=0）不应继续提供效果。
+    int find_pet_with_soulmark(int owner, int soulmark_id) const {
+        if (owner < 0 || owner > 1 || soulmark_id <= 0) {
+            return -1;
+        }
+        for (int slot = 0; slot < 6; ++slot) {
+            const ElfPet& pet = seerRobot[owner].elfPets[slot];
+            if (pet.hp > 0 && pet.soulMark.id == soulmark_id) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
     //--- 设置当前玩家 ---
     void set_current_player(int player_id) { current_player_id_ = player_id; }
 

@@ -24,3 +24,5 @@ node_modules/
 reference/
 *.dylib
 *.json*
+# clangd 索引缓存（本地生成，不追踪）
+.cache/
