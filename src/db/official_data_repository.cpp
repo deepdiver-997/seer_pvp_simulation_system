@@ -276,7 +276,8 @@ std::optional<CustomProgramRecord> OfficialDataRepository::load_custom_program(i
         db_,
         "SELECT effect_id, skill_id, kind, name_zh, unit_json, memo "
         "FROM custom_effect_programs "
-        "WHERE (?1 = -1 OR effect_id = ?1) AND (?2 = -1 OR skill_id = ?2) "
+        // （skill_id=-1 = 通用模板, 适用于任意技能；否则=仅该技能）
+        "WHERE (?1 = -1 OR effect_id = ?1) AND (?2 = -1 OR skill_id = -1 OR skill_id = ?2) "
         "LIMIT 1"
     );
     if (!stmt || !bind_int(stmt.get(), 1, effect_id) || !bind_int(stmt.get(), 2, skill_id)) {
