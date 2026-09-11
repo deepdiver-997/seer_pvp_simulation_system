@@ -36,6 +36,7 @@ set(SIM_CORE_SOURCES
     src/entities/numerical-properties.cpp
     src/entities/elemental-attributes.cpp
     src/entities/skills.cpp
+    src/entities/seer-robot.cpp
     src/entities/soul_mark_manager.cpp
     src/fsm/battleContext.cpp
     src/fsm/battleFsm.cpp

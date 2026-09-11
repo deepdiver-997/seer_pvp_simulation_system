@@ -655,7 +655,7 @@ void BattleFsm::operation(BattleContext* battleContext, int robotId, ActionType 
             }
             break;
         case ActionType::USE_MEDICINE:
-            (robot.use_medicine(pet, index) ? std::cout << "Used medicine: " << robot.medicines[index] << std::endl : std::cerr << "Cannot use medicine: " << robot.medicines[index] << std::endl);
+            (robot.use_medicine(battleContext, robotId, index) ? std::cout << "Used medicine: " << robot.medicines[index] << std::endl : std::cerr << "Cannot use medicine: " << robot.medicines[index] << std::endl);
             battleContext->roundChoice[robotId][0] = static_cast<int>(ActionType::USE_MEDICINE);
             battleContext->roundChoice[robotId][1] = index;
             break;
