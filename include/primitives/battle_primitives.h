@@ -202,8 +202,9 @@ HealResult heal_amount(BattleContext* ctx, int target, int amount);
 /**
  * clear_stat_boosts - 消除目标方正等级上的能力提升（"消除双方能力提升状态"）。
  * 只清提升（等级 > 0 → 0），不动弱化/负等级。
+ * 返回清掉的提升个数（0 = 目标本无提升 = "消强未成功"，调用方可据此决定后续分支，如"消强成功→必先"）。
  */
-void clear_stat_boosts(BattleContext* ctx, int target);
+int clear_stat_boosts(BattleContext* ctx, int target);
 
 /**
  * grant_guaranteed_first - 授予"下一回合必定先出手"（必先，分等级）。

@@ -25,8 +25,8 @@ struct CoreApi {
                                         int duration_rounds, int actor);
     // 断回合（查免断 + 发 EVENT_BREAK + 清回合类盔威封属）。
     BreakResult (*break_round_effects)(BattleContext*, int target);
-    // 消除目标正等级能力提升（"消除双方能力提升状态"）。
-    void (*clear_stat_boosts)(BattleContext*, int target);
+    // 消除目标正等级能力提升（"消除双方能力提升状态"）。返回清掉个数(0=消强未成功)。
+    int (*clear_stat_boosts)(BattleContext*, int target);
     // 按数值恢复（吃封回血 + 恢复效果修正% + 记 last_heal）。
     HealResult (*heal_amount)(BattleContext*, int target, int amount);
     // 授予"下一回合必先"（分等级：tier 越高越先；可被断回合移除）。

@@ -387,16 +387,19 @@ HealResult heal_amount(BattleContext* ctx, int target, int amount) {
     return HealResult::SUCCESS;
 }
 
-void clear_stat_boosts(BattleContext* ctx, int target) {
+int clear_stat_boosts(BattleContext* ctx, int target) {
     if (!ctx || target < 0 || target > 1) {
-        return;
+        return 0;
     }
     ElfPet& pet = ctx->getPet(target);
+    int cleared = 0;
     for (auto& lv : pet.levels) {  // 只清提升（正等级），不动弱化/负等级
         if (lv > 0) {
             lv = 0;
+            ++cleared;
         }
     }
+    return cleared;  // 0 = 目标本无提升（消强未成功）
 }
 
 namespace {
