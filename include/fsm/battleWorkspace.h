@@ -74,7 +74,9 @@ struct BattleWorkspace {
 
     //========== 先手权 ==========
     PreemptiveRight preemptive_right;
-    int preemptive_level[2];  // 先制等级，数值越大优先级越高
+    int preemptive_level[2];   // 先制等级，数值越大优先级越高
+    int guaranteed_first[2];   // 必先等级（0=无；>0 越高越先）。在先手权时点由"必先"回合效果置位，
+                               // 先于先制/速度判定。每回合先手权处 memset 复位。
 
     //========== 伤害计算 ==========
     DamageSnapshot pendingDamage;   // 加算减伤后

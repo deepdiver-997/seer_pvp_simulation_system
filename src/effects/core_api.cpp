@@ -10,6 +10,7 @@ const CoreApi& core_api() {
         /*break_round_effects=*/&break_round_effects,
         /*clear_stat_boosts=*/&clear_stat_boosts,
         /*heal_amount=*/&heal_amount,
+        /*grant_guaranteed_first=*/&grant_guaranteed_first,
     };
     return api;
 }

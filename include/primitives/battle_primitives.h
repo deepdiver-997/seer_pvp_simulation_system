@@ -206,6 +206,14 @@ HealResult heal_amount(BattleContext* ctx, int target, int amount);
 void clear_stat_boosts(BattleContext* ctx, int target);
 
 /**
+ * grant_guaranteed_first - 授予"下一回合必定先出手"（必先，分等级）。
+ * 注册一个 once 回合类效果到 BATTLE_FIRST_MOVE_RIGHT：下一次先手权时点置
+ * ws.guaranteed_first[owner]=tier（tier 越高越先）。是回合类效果 → 可被断回合移除；
+ * once + 先手权处 memset → 只在下一回合生效一次。
+ */
+void grant_guaranteed_first(BattleContext* ctx, int owner, int tier);
+
+/**
  * fixed_damage - 固定伤害（复用 deal_damage，吃护盾/事件）。
  */
 FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount);

@@ -29,6 +29,8 @@ struct CoreApi {
     void (*clear_stat_boosts)(BattleContext*, int target);
     // 按数值恢复（吃封回血 + 恢复效果修正% + 记 last_heal）。
     HealResult (*heal_amount)(BattleContext*, int target, int amount);
+    // 授予"下一回合必先"（分等级：tier 越高越先；可被断回合移除）。
+    void (*grant_guaranteed_first)(BattleContext*, int owner, int tier);
 };
 
 // sim_core 暴露的 CoreApi 单例（实际填充）。插件侧不调它；由 core 在初始化时传入。

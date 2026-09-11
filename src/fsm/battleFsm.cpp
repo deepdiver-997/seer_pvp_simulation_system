@@ -915,6 +915,7 @@ void BattleFsm::handle_BattleFirstMoveRight(BattleContext* battleContext) {
     auto &pr = battleContext->preemptive_right;
     pr = PreemptiveRight::NONE;
     memset(battleContext->ws.preemptive_level, 0, sizeof(battleContext->ws.preemptive_level));
+    memset(battleContext->ws.guaranteed_first, 0, sizeof(battleContext->ws.guaranteed_first));
     battleContext->execute_registered_actions(0, State::BATTLE_FIRST_MOVE_RIGHT);
     battleContext->execute_registered_actions(1, State::BATTLE_FIRST_MOVE_RIGHT);
     // 回合类效果的先手权已经被写入ws.preemptive_level供后续使用，这里先判断是否有效果直接决定先手权
@@ -942,6 +943,21 @@ void BattleFsm::handle_BattleFirstMoveRight(BattleContext* battleContext) {
         battleContext->generateState();
         return;
     }
+    // 必先等级比较（优先于先制/速度）：仅一方有必先 → 它有；双方都有 → 比等级；
+    // 相等/都无 → 落回先制比较。必先由回合效果在 FIRST_MOVE_RIGHT 时点置位（可被断回合移除）。
+    const int kGf0 = battleContext->ws.guaranteed_first[0];
+    const int kGf1 = battleContext->ws.guaranteed_first[1];
+    if (kGf0 > 0 || kGf1 > 0) {
+        if (kGf0 > kGf1) {
+            pr = PreemptiveRight::SEER_ROBOT_1;
+            log("Preemptive right determined by guaranteed-first tier: player0 wins.");
+        } else if (kGf0 < kGf1) {
+            pr = PreemptiveRight::SEER_ROBOT_2;
+            log("Preemptive right determined by guaranteed-first tier: player1 wins.");
+        }
+        // 双方同等级必先 → 落回先制比较
+    }
+    if (pr == PreemptiveRight::NONE) {
     // 都使用了技能，比较先制等级
     // 基值先制已在选择期（on_selected）累加进 ws.preemptive_level；此处不再重复读 skill.priority
     if (battleContext->ws.preemptive_level[0] > battleContext->ws.preemptive_level[1]) {
@@ -967,6 +983,7 @@ void BattleFsm::handle_BattleFirstMoveRight(BattleContext* battleContext) {
             log("Preemptive right determined by tie-break: " + std::string(pr == PreemptiveRight::SEER_ROBOT_1 ? "player0 wins." : "player1 wins."));
         }
     }
+    }  // if (pr == NONE)
     battleContext->generateState();
 }
 

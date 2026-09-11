@@ -12,9 +12,11 @@
 #include <primitives/battle_primitives.h>
 
 #include <abnormal-system/abnormal-types.h>
+#include <effects/continuousEffect.h>
 #include <entities/elf-pet.h>
 #include <entities/mark.h>
 #include <fsm/battleContext.h>
+#include <fsm/state.h>
 
 #include <iostream>
 
@@ -395,6 +397,39 @@ void clear_stat_boosts(BattleContext* ctx, int target) {
             lv = 0;
         }
     }
+}
+
+namespace {
+
+// 必先授予效果：在先手权时点把 ws.guaranteed_first[owner] 置为 tier。
+EffectResult effect_set_guaranteed_first(BattleContext* ctx, const EffectArgs& args) {
+    if (!ctx || !args.int_args || args.int_count < 3) {
+        return EffectResult::kOk;
+    }
+    const int owner = args.int_args[0];
+    if (owner < 0 || owner > 1) {
+        return EffectResult::kOk;
+    }
+    ctx->ws.guaranteed_first[owner] = args.int_args[2];  // tier
+    return EffectResult::kOk;
+}
+
+}  // namespace
+
+void grant_guaranteed_first(BattleContext* ctx, int owner, int tier) {
+    if (!ctx || owner < 0 || owner > 1 || tier <= 0) {
+        return;
+    }
+    // 注册 once 回合类效果到 BATTLE_FIRST_MOVE_RIGHT：下一次先手权时点触发一次 → "下一回合必先"。
+    // duration=2 保证活到下一回合(N+1)。先手权处每回合 memset → 只在下一回合生效；断回合可移除它。
+    Effect e;
+    e.id = 999201;  // 必先授予
+    e.logic = &effect_set_guaranteed_first;
+    e.args = EffectArgs(std::vector<int>{owner, owner ^ 1, tier});
+    auto ce = std::make_unique<ContinuousEffect>(e, State::BATTLE_FIRST_MOVE_RIGHT, owner,
+                                                 /*duration_rounds=*/2, ctx->roundCount);
+    ce->once_ = true;
+    ctx->register_skill_effect(State::BATTLE_FIRST_MOVE_RIGHT, owner, std::move(ce));
 }
 
 FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount) {
