@@ -1223,7 +1223,7 @@ void BattleFsm::handle_BattleRoundReductionAllRoundMinus(BattleContext* battleCo
     // 先执行注册在本时点的效果（包括断回合效果本身）
     battleContext->execute_registered_actions(-1, State::BATTLE_ROUND_REDUCTION_ALL_ROUND_MINUS);
     // 回合型盔/威/封属每回合递减，到 0 注销（次数型不动）
-    battleContext->skill_invalid_center_.tick_rounds();
+    battleContext->rule_center_.tick_rounds();
     // 然后统一清理所有已过期的回合类效果
     battleContext->cleanup_expired_effects();
     battleContext->generateState();

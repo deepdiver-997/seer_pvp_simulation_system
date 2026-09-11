@@ -401,8 +401,8 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         if ((std::rand() % 100) >= hit_chance) {
             // miss 也照常 notify 中心：文档 §2.3「一旦本次技能命中失败（miss 类），
             // 会消耗所有可响应的次数类效果」——狮盔会被响应并消耗，尽管技能是 miss 的。
-            ctx->skill_invalid_center_.notify(
-                ctx, owner, owner, type == SkillType::Attribute, this->power,
+            ctx->rule_center_.notify(
+                ctx, owner, type == SkillType::Attribute, this->power,
                 ctx->ws.attack_credential[owner].ignore_attack_immunity);
             return SkillUsageResult::MISS;
         }
@@ -416,8 +416,8 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
     // 注：miss 分支已在 ① 提前 return —— 但那里**也要** notify（miss 同样消费可响应的次数类），
     //     见下方 ① 的改动。miss 时该处返回被丢弃（走 MISS，不看命中失效）。
     const bool is_attribute = (type == SkillType::Attribute);
-    const SkillInvalidNotifyResult nr = ctx->skill_invalid_center_.notify(
-        ctx, owner, owner, is_attribute, this->power,
+    const SkillInvalidNotifyResult nr = ctx->rule_center_.notify(
+        ctx, owner, is_attribute, this->power,
         ctx->ws.attack_credential[owner].ignore_attack_immunity);
     switch (nr) {
         case SkillInvalidNotifyResult::INVALID:
@@ -619,23 +619,11 @@ std::optional<HitInvalidMode> Skills::is_hit_effect_invalid(BattleContext* ctx, 
     if (ctx && owner >= 0 && owner <= 1 && ctx->ws.attack_credential[owner].force_execute) {
         return std::nullopt;
     }
-    // ③层触发源：防御方（1-owner）挂了命中效果失效桶 → 消费一次并返回模式。
+    // ③层触发源：防御方（1-owner）挂了命中效果失效 → 消费一次并返回模式（RuleCenter HIT_INVALID）。
     if (ctx && owner >= 0 && owner <= 1) {
-        auto& entries = ctx->hit_effect_invalids[1 - owner];
-        for (auto it = entries.begin(); it != entries.end();) {
-            if (it->remaining <= 0) {
-                it = entries.erase(it);  // 清理过期条目（entries 保序）
-            } else {
-                break;  // 第一条有效即用
-            }
-        }
-        if (!entries.empty()) {
-            const HitInvalidMode mode = entries.front().mode;
-            --entries.front().remaining;
-            if (entries.front().remaining <= 0) {
-                entries.erase(entries.begin());
-            }
-            return mode;
+        const std::optional<int> mode = ctx->rule_center_.consume_hit_invalid(/*defender=*/1 - owner);
+        if (mode.has_value()) {
+            return static_cast<HitInvalidMode>(*mode);
         }
     }
     return std::nullopt;

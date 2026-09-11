@@ -18,9 +18,8 @@
 #include <effects/continuousEffect.h>
 #include <effects/pendingEffect.h>
 #include <effects/timed_bucket.h>
-#include <effects/skill_invalid_center.h>
+#include <effects/rule_center.h>
 #include <effects/event_center.h>
-#include <effects/immunity_center.h>
 #include <effects/damage_pipeline.h>
 #include <entities/soul_mark.h>
 #include <fsm/state.h>
@@ -75,35 +74,16 @@ public:
     // 断回合补偿 = 监听 EVENT_BREAK 的 watcher（经 register_break_callback 注册）。
     EventCenter event_center_;
 
-    //--- 免疫内核 ---
-    // 免断/魂免/免伤/免弱/异常免疫统一查询。断回合、异常施加原语在动作前查 is_immune。
-    // 免疫源经 grant_immunity / revoke_immunity 管理，独立于效果桶（天然不可被断）。
-    ImmunityCenter immunity_center_;
+    //--- 统一规则容器 ---
+    // 免疫(纯查询) + 盔威封属/命中失效(消费) + ③层命中失效 合一。
+    // 每条 ticket 显式带 source(挂载)/target(生效)；覆盖键 (source_owner,effect_id,category,subtype)。
+    // 生命周期锚 source：施放方换宠清 ON_STAGE、断施放方回合清回合类封属。结构见 effects/rule_center.h。
+    RuleCenter rule_center_;
 
     //--- 伤害修正管线 ---
     // 伤害值在 resolvedDamage 中流经 DamagePhase 节点，各阶段效果读写它。
     // 类别抑制（damage_suppress_mask）按效果类别跳过被抑制方的伤害效果。
     DamagePipeline damage_pipeline_;
-
-    //--- 技能无效中心（盔 / 威 / 封属）---
-    // 结构见 effects/skill_invalid_center.h；权威口径见
-    // docs/02-效果系统/技能判定流程与无效效果体系.md §5.1-5.4。
-    //
-    // 为什么不并入 TimedBucket：TimedBucket 是"到点执行**自己**"，而盔/威是
-    // "**被别人查询**并消费"，自己不主动到时点执行——两类生命周期不同。
-    //
-    // 换宠清理：SELF 绑定按 source_slot 清理（invalidate_on_stage_effects）；
-    //          TEAM 绑定切换保留。
-    SkillInvalidCenter skill_invalid_center_;
-
-    //--- 命中效果失效桶（③层：命中但效果不注册；白板=伤害归0/保留伤害=伤害照常）---
-    // 挂在防御方上：其技能命中时命中效果被失效。mode 见 effect.h HitInvalidMode。
-    struct HitEffectInvalid {
-        int source_id = -1;
-        HitInvalidMode mode = HitInvalidMode::kEffectsOnly;
-        int remaining = 0;  // 剩余失效次数
-    };
-    std::vector<HitEffectInvalid> hit_effect_invalids[2];  // [被失效方]
 
     //--- 次数型穿透授予（挂在自己身上，"下1次攻击无视伤害限制"类）---
     // 跨回合持久；成功使用攻击技能后统一消费（每槽 remaining-1，0 移除）。
@@ -308,26 +288,18 @@ public:
     }
 
     //--- 技能无效条目授予（内联入口，仿 grant_immunity）---
-    // 插件动态库不链接 sim_core（CLAUDE.md 3.9），seal_skill 原语与
-    // SkillInvalidCenter::register_armor 均非 inline 调不了——这是插件挂"盔/威/封属"
-    // 的唯一入口。语义对齐 seal_skill 原语：
-    //   target = 被拦截方（条目挂它桶上，**它**的技能使用被无效；盔的"持有者"是语义概念，
-    //            物理上挂在使用方桶，见技能判定流程与无效效果体系.md §5.2）；
-    //   counts/rounds 二选一（>0 生效：次数型响应即耗，回合型响应不消耗）；
-    //   同 (target, source_slot, effect_id, kind) 覆盖刷新。
-    void grant_skill_invalid(int target, int source_slot, int effect_id, SkillArmor::Kind kind,
-                             int counts, int rounds, bool penetrable,
-                             InvalidBinding binding = InvalidBinding::SELF) {
-        if (target < 0 || target > 1) {
+    // 插件动态库不链接 sim_core（CLAUDE.md 3.9），seal_skill 原语非 inline 调不了——
+    // 这是插件挂"盔/威/封属"的唯一入口。统一语义对齐 seal_skill：
+    //   source = 挂载（施放）方，target = 被封方；counts/rounds 二选一；
+    //   覆盖键 (source_owner, effect_id, category, subtype=kind) 刷新，不追加。
+    void grant_skill_invalid(int source, int target, int source_slot, int effect_id,
+                             SealKind kind, int counts, int rounds, bool penetrable,
+                             EffectScope scope = EffectScope::ON_STAGE) {
+        if (source < 0 || source > 1 || target < 0 || target > 1) {
             return;
         }
-        SkillArmor armor;
-        armor.kind = kind;
-        armor.remaining_counts = counts;
-        armor.remaining_rounds = rounds;
-        armor.penetrable = penetrable;
-        armor.source_effect_id = effect_id;
-        skill_invalid_center_.register_armor(target, source_slot, armor, binding);
+        rule_center_.grant_seal(source, source_slot, effect_id, target, kind, counts,
+                                rounds, penetrable);  // scope 默认 ON_STAGE
     }
 
     //--- 伤害抗性有效视图 ---
@@ -384,17 +356,15 @@ public:
         skills_effects.reset_round_count(owner);
         soul_mark_effects.reset_round_count(owner);
         penetration_grants[owner].clear();  // 次数型穿透授予不继承给新精灵
-        hit_effect_invalids[owner].clear();  // 命中效果失效（③层）不继承给新精灵
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
         pending_skill_replacement[owner] = SkillReplaceSource{};  // 米修莉式转换不继承（"下场不保留"）
-        // 技能无效条目：清掉**下场精灵**（当前 on_stage）注册的 SELF 绑定条目；
-        // TEAM 绑定保留（队伍被动，切换不丢）。注意此处 on_stage 尚未更新 → 正是下场槽。
-        skill_invalid_center_.clear_self_for_slot(owner, on_stage[owner]);
-        // 免疫源：清掉 ON_STAGE 绑定的（天生免疫/回合类免断/次免都属于在场精灵）；
-        // TEAM 绑定保留（可传承次免等）。新精灵登场时由魂印/技能重新 grant。
-        immunity_center_.clear_on_stage(owner);
+        // 统一规则容器：清掉**下场精灵**（当前 on_stage）挂载的 ON_STAGE 条目
+        // （免疫源 + 盔/威/封属 + ③层命中失效一起）；TEAM 绑定保留（队伍被动，切换不丢）。
+        // ⚠️ 生命周期锚 source：封属/命中失效挂**施放方**，故清的是施放方换宠名下的；
+        //    免疫挂被护方自身(source==target)。on_stage 尚未更新 → 正是下场槽。
+        rule_center_.clear_on_stage(owner, on_stage[owner]);
         pink_immune[owner] = false;          // 临时粉伤状态不继承给新精灵
         // 注：伤害抗性本体在 pet 上（跨切换保留），不在此清；ws 有效视图由
         //     调用方的 sync_workspace_from_on_stage → sync_damage_resist_view 从新精灵重基。
@@ -411,12 +381,10 @@ public:
         skills_effects.clear();
         soul_mark_effects.clear();
         updater_effects.clear();
-        skill_invalid_center_.clear();
+        rule_center_.clear_all();  // 免疫 + 盔/威/封属 + ③层命中失效 一次清
         pending_effects.clear();
         penetration_grants[0].clear();
         penetration_grants[1].clear();
-        hit_effect_invalids[0].clear();
-        hit_effect_invalids[1].clear();
         force_execute_on_pp0[0] = false;
         force_execute_on_pp0[1] = false;
         ignore_pp[0] = false;
@@ -441,7 +409,7 @@ public:
             }
         }
         event_center_.clear_all();
-        immunity_center_.clear_all();
+        rule_center_.clear_all();
         damage_pipeline_.clear();
         install_default_damage_reduction();
     }
@@ -508,12 +476,16 @@ public:
                        uint64_t anomaly_mask = 0, int duration_rounds = 0, int source_id = 0,
                        bool soul_immunity = false,
                        EffectScope scope = EffectScope::ON_STAGE) {
-        return immunity_center_.grant(owner, type, coverage, anomaly_mask,
-                                      duration_rounds, roundCount, source_id, soul_immunity, scope);
+        // 免疫单对象：source==target==被护方 owner。转发 RuleCenter（覆盖键含 subtype=type，
+        // 免异常+免弱不同 type 各占一条）。
+        return rule_center_.grant_immune(owner, static_cast<int>(type), coverage, anomaly_mask,
+                                         duration_rounds, roundCount, source_id, soul_immunity,
+                                         scope, /*source_slot=*/-1);
     }
 
     void revoke_immunity(int owner, int source_id) {
-        immunity_center_.revoke(owner, source_id);
+        (void)owner;  // 句柄唯一，按 source_id 撤销
+        rule_center_.revoke(source_id);
     }
 
     /**
@@ -521,15 +493,18 @@ public:
      * @param status_id ANOMALY 类型专用：被查询的异常状态 id；其余类型忽略
      */
     bool is_immune(int owner, ImmunityType type, State timing, int status_id = 0) const {
-        return immunity_center_.is_immune(owner, type, state_coverage_bit(timing), roundCount, status_id);
+        return rule_center_.is_immune(owner, static_cast<int>(type), state_coverage_bit(timing),
+                                      roundCount, status_id);
     }
 
     // 细分查询：次免/回合类免疫（soul=false）先于抗性判定；魂免（soul=true）在抗性失败后才查。
     bool is_immune_effect(int owner, ImmunityType type, State timing, int status_id = 0) const {
-        return immunity_center_.is_immune_effect(owner, type, state_coverage_bit(timing), roundCount, status_id);
+        return rule_center_.is_immune(owner, static_cast<int>(type), state_coverage_bit(timing),
+                                      roundCount, status_id, /*soul_filter=*/0);
     }
     bool is_immune_soul(int owner, ImmunityType type, State timing, int status_id = 0) const {
-        return immunity_center_.is_immune_soul(owner, type, state_coverage_bit(timing), roundCount, status_id);
+        return rule_center_.is_immune(owner, static_cast<int>(type), state_coverage_bit(timing),
+                                      roundCount, status_id, /*soul_filter=*/1);
     }
 
     //--- 伤害管线便利方法 ---

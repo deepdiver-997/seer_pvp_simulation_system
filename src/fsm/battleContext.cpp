@@ -253,7 +253,7 @@ void BattleContext::cleanup_expired_effects() {
     event_center_.cleanup(roundCount, watcher_valid_id);
 
     // 清理窗口已过的免疫 Provider
-    immunity_center_.cleanup(roundCount);
+    rule_center_.cleanup(roundCount);
 }
 
 // invalidate_all_round_effects 已内联至头文件（插件需可见）。

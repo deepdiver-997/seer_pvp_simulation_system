@@ -189,14 +189,15 @@ BreakResult break_round_effects(BattleContext* ctx, int target) {
 
     // 对手没有可清除的回合类效果 → 清除失败（无事发生），不 emit。
     // 回合类盔/威/封属也算回合类效果（可被断清除）。
-    if (!ctx->has_round_effects(target) && !ctx->skill_invalid_center_.has_round_type(target)) {
+    if (!ctx->has_round_effects(target) && !ctx->rule_center_.has_round_type(target)) {
         return BreakResult::NO_EFFECTS;
     }
 
     // 成功：机械无效化 + 事件（补偿 watcher 在 FSM drain 点投递）
     ctx->invalidate_all_round_effects(target);
-    // 断回合清回合类盔/威/封属（次数类保留）
-    ctx->skill_invalid_center_.clear_round_type(target);
+    // 断回合清回合类盔/威/封属（次数类保留）。统一锚 source：断"target(被断方)"名下
+    // 挂载的回合类拦截——封属属于其施放方，故断施放方回合解封。
+    ctx->rule_center_.clear_round_type(target);
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_BREAK, ctx->opponent(target), target});
     return BreakResult::SUCCESS;
 }
@@ -287,37 +288,31 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target, actual_damage});
 }
 
-void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
-                int count, int duration_rounds, bool penetrable, int source_slot,
-                InvalidBinding binding, bool hit_invalid) {
-    if (!ctx || target < 0 || target > 1 || count <= 0) {
+void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute,
+                bool attack, int count, int duration_rounds, bool penetrable, int source_slot,
+                EffectScope scope, bool hit_invalid) {
+    if (!ctx || source < 0 || source > 1 || target < 0 || target > 1 || count <= 0) {
         return;
     }
     if (!attribute && !attack) {
         return;
     }
-
-    SkillArmor armor;
-    // 命中失效语义(SEAL_ATTRIBUTE_HIT)只在"封属性技能"下有意义（官方命中失效封属即针对属性技能）。
+    // 统一调度到 RuleCenter：source=挂载(施放)方，target=生效(被封)方。scope 默认 ON_STAGE。
+    // 命中失效语义(SEAL_ATTRIBUTE_HIT)只在"封属性技能"下有意义。
+    SealKind kind = (attribute && attack) ? SealKind::SEAL_ALL
+        : (attack ? SealKind::SEAL_ATTACK : SealKind::SEAL_ATTRIBUTE);
     if (hit_invalid && attribute && !attack) {
-        armor.kind = SkillArmor::Kind::SEAL_ATTRIBUTE_HIT;
-    } else if (attribute && attack) {
-        armor.kind = SkillArmor::Kind::SEAL_ALL;
-    } else {
-        armor.kind = attack ? SkillArmor::Kind::SEAL_ATTACK : SkillArmor::Kind::SEAL_ATTRIBUTE;
+        kind = SealKind::SEAL_ATTRIBUTE_HIT;
     }
-    armor.penetrable = penetrable;
-    armor.source_effect_id = effect_id;
-    // 回合型 / 次数型二选一（文档 §5.1）：有 duration 走回合型（响应不消耗，靠减扣点/断回合结束），
-    // 否则走次数型（响应即减，减到 0 注销）。
+    // 回合型 / 次数型**二选一**（文档 §5.1）：有 duration 走回合型（remaining_counts 不设，
+    // 响应不消耗，靠 tick/断回合结束）；否则走次数型（响应即减，减到 0 注销）。
     if (duration_rounds > 0) {
-        armor.remaining_rounds = duration_rounds;
+        ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
+                                     /*counts=*/0, duration_rounds, penetrable, scope);
     } else {
-        armor.remaining_counts = count;
+        ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
+                                     count, /*rounds=*/0, penetrable, scope);
     }
-
-    // 同 (owner, source_slot, source_effect_id, kind) → 覆盖刷新（不累加），见中心头注释。
-    ctx->skill_invalid_center_.register_armor(target, source_slot, armor, binding);
 }
 
 void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
@@ -325,8 +320,10 @@ void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
-    ctx->hit_effect_invalids[target].push_back(
-        BattleContext::HitEffectInvalid{source_id, mode, count});
+    // ③层并入 RuleCenter(HIT_INVALID)：target=被失效方(防御方)。source_id 无 effect 语义，此处作
+    // 覆盖键来源占位（同 target+mode 刷新）。
+    ctx->rule_center_.grant_hit_invalid(target, /*source_slot=*/-1, source_id, static_cast<int>(mode),
+                                        count);
 }
 
 StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta) {
