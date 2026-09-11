@@ -11,6 +11,7 @@ const CoreApi& core_api() {
         /*clear_stat_boosts=*/&clear_stat_boosts,
         /*heal_amount=*/&heal_amount,
         /*grant_guaranteed_first=*/&grant_guaranteed_first,
+        /*stat_change=*/&stat_change,
     };
     return api;
 }
