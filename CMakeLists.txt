@@ -16,6 +16,8 @@ option(BATTLE_FSM_VERBOSE_DEFAULT "Enable verbose FSM trace by default" OFF)
 find_package(Boost REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
+# 认证数据层：离线编码效果程序(JSON)加载器依赖 nlohmann::json（header-only）。
+find_path(NLOHMANN_INCLUDE_DIR nlohmann/json.hpp)
 
 set(SIM_CORE_SOURCES
     src/primitives/battle_primitives.cpp
@@ -24,6 +26,7 @@ set(SIM_CORE_SOURCES
     src/effects/effect_meta.cpp
     src/effects/effect_unit.cpp
     src/effects/effect_unit_parser.cpp
+    src/effects/effect_unit_loader.cpp
     src/effects/pendingEffect.cpp
     src/effects/timed_bucket.cpp
     src/effects/skill_invalid_center.cpp
@@ -41,6 +44,7 @@ set(SIM_CORE_SOURCES
 
 add_library(sim_core STATIC ${SIM_CORE_SOURCES})
 target_include_directories(sim_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(sim_core PRIVATE ${NLOHMANN_INCLUDE_DIR})
 if(TARGET Boost::headers)
     target_link_libraries(sim_core PUBLIC Boost::headers)
 else()

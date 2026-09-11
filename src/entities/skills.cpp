@@ -8,6 +8,7 @@
 
 #include <effects/effect_meta.h>
 #include <effects/effect_unit_parser.h>
+#include <effects/effect_unit_loader.h>
 #include <fsm/battleContext.h>
 
 namespace {
@@ -218,21 +219,38 @@ bool Skills::loadSkills() {
             }
             continue;
         }
-        // ── 认证数据层接缝（custom_* 表）──────────────────────────────
-        // 查询顺序：custom_effect_programs(离线编码程序) 优先，命中则替代下方"注册函数→
-        // 运行时 parser"路径(离线编码、不碰脆弱文本解析)；custom_effect_overrides(官差纠偏)
-        // 处理"与官方不一致/官方死列/bug"的处置。两张表在未落地前(表空/表不存在)都安全返回
-        // nullopt → 走既有路径, 行为不变。程序 unit_json → EffectUnit 的 JSON 加载器
-        // 由后续"迁移无相谛 6 模板"步骤接入(TODO 认证数据层)。
+        // ── 认证数据层（custom_* 表）──────────────────────────────
+        // ① override(官差纠偏, 待 seeds 落地后接 dispatch：ignore/dead_column/map_to/...)；
+        // ② program(离线编码效果程序)：命中则用 JSON 加载器构造单元, 替代下方"注册函数→
+        //    运行时文本 parser"路径（离线编码、不碰脆弱官方文本解析）。
+        // 两张表在未落地前(表空/缺表)安全返回 nullopt → 走既有路径, 行为不变。
         auto& repository = store.repository();
+        const auto custom_ovr = repository.load_custom_override(effect_record.effect_id);
         const auto custom_prog = repository.load_custom_program(effect_record.effect_id, this->id);
-        const auto custom_ovr = custom_prog ? std::nullopt
-                                            : repository.load_custom_override(effect_record.effect_id);
-        (void)custom_ovr;  // override 处置(ignore/map_to/...)待程序加载器落地后生效
-        if (!custom_prog) {
-            // 未命中离线程序：走既有 注册函数 → parser 兜底路径。
-            Effect effect = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));
-            if (!effect.logic) {
+        (void)custom_ovr;  // override dispatch 待 seeds 落地后接（现在只是查询接缝）。
+        if (custom_prog) {
+            // 离线编码程序：JSON → EffectUnit（skill_args 解析 {"arg":n} 占位）。
+            const int unit_idx =
+                load_effect_unit_from_json(custom_prog->unit_json, effect_record.args, parsed_units_);
+            if (unit_idx >= 0) {
+                Effect unit_effect;
+                unit_effect.id = effect_record.effect_id;
+                unit_effect.logic = &effect_run_parsed_unit;
+                unit_effect.args = EffectArgs(
+                    build_effect_args_for_skill(effect_record).owned_int_args,
+                    &parsed_units_[static_cast<std::size_t>(unit_idx)]
+                );
+                add_effect_node(
+                    default_branch_for_effect(effect_record.effect_id),
+                    SkillEffectNode(std::move(unit_effect), effect_register_state(effect_record.effect_id))
+                );
+            }
+            // 程序加载失败(unit_idx<0)：声明在 custom 层却解析失败 → 数据 bug, 跳过并暴露。
+            continue;
+        }
+        // 未命中离线程序：走既有 注册函数 → parser 兜底路径。
+        Effect effect = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));
+        if (!effect.logic) {
             // 未注册函数：尝试解析模板为条件效果单元（组合语法），成功则注册通用执行器
             // （args.extra 指向 Skills::parsed_units_ 内单元）。失败维持跳过（现状）。
             const int unit_idx = parse_effect_unit(effect_record.info, effect_record.args, parsed_units_);
@@ -255,7 +273,6 @@ bool Skills::loadSkills() {
             default_branch_for_effect(effect_record.effect_id),
             SkillEffectNode(std::move(effect), effect_register_state(effect_record.effect_id))
         );
-    }   // if (!custom_prog)
     }
 
     // 基值先制也作为一条选择期效果数据放进 selection_effects_：
