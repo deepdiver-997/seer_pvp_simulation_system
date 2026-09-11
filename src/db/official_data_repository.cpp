@@ -265,6 +265,64 @@ std::vector<SkillEffectRecord> OfficialDataRepository::load_skill_effects(int mo
     return skill ? skill->effects : std::vector<SkillEffectRecord>{};
 }
 
+std::optional<CustomProgramRecord> OfficialDataRepository::load_custom_program(int effect_id, int skill_id) const {
+    // 认证数据层：查离线编码效果程序。effect_id/skill_id 传 -1 表示"不按该维过滤"；
+    // 表空时返回 nullopt → 调用方走既有注册函数/parser 路径，行为不变。
+    if (!db_) {
+        last_error_ = "database is not open";
+        return std::nullopt;
+    }
+    Statement stmt(
+        db_,
+        "SELECT effect_id, skill_id, kind, name_zh, unit_json, memo "
+        "FROM custom_effect_programs "
+        "WHERE (?1 = -1 OR effect_id = ?1) AND (?2 = -1 OR skill_id = ?2) "
+        "LIMIT 1"
+    );
+    if (!stmt || !bind_int(stmt.get(), 1, effect_id) || !bind_int(stmt.get(), 2, skill_id)) {
+        last_error_ = sqlite3_errmsg(db_);
+        return std::nullopt;
+    }
+    if (sqlite3_step(stmt.get()) != SQLITE_ROW) {
+        return std::nullopt;
+    }
+    CustomProgramRecord r;
+    r.effect_id = sqlite3_column_int(stmt.get(), 0);
+    r.skill_id = sqlite3_column_int(stmt.get(), 1);
+    r.kind = column_text(stmt.get(), 2);
+    r.name_zh = column_text(stmt.get(), 3);
+    r.unit_json = column_text(stmt.get(), 4);
+    r.memo = column_text(stmt.get(), 5);
+    return r;
+}
+
+std::optional<CustomOverrideRecord> OfficialDataRepository::load_custom_override(int effect_id) const {
+    // 认证数据层：查官方差异纠偏(此 effect 是否采用与官方不同的解释/处置)。
+    if (!db_) {
+        last_error_ = "database is not open";
+        return std::nullopt;
+    }
+    Statement stmt(
+        db_,
+        "SELECT effect_id, override_type, map_value, source_scope, rationale "
+        "FROM custom_effect_overrides WHERE effect_id = ?1 LIMIT 1"
+    );
+    if (!stmt || !bind_int(stmt.get(), 1, effect_id)) {
+        last_error_ = sqlite3_errmsg(db_);
+        return std::nullopt;
+    }
+    if (sqlite3_step(stmt.get()) != SQLITE_ROW) {
+        return std::nullopt;
+    }
+    CustomOverrideRecord r;
+    r.effect_id = sqlite3_column_int(stmt.get(), 0);
+    r.override_type = column_text(stmt.get(), 1);
+    r.map_value = column_text(stmt.get(), 2);
+    r.source_scope = column_text(stmt.get(), 3);
+    r.rationale = column_text(stmt.get(), 4);
+    return r;
+}
+
 std::optional<int> OfficialDataRepository::find_monster_id_by_exact_name(const std::string& monster_name) const {
     if (!db_) {
         last_error_ = "database is not open";

@@ -37,6 +37,25 @@ struct SkillRecord {
     std::vector<SkillEffectRecord> effects;
 };
 
+// 认证数据层（custom_effect_programs / custom_effect_overrides 表）——非官方字段。
+// 见 scripts/import_seer_unity_sqlite.py SCHEMA 里 custom_* 表的注释；随官方 import 重刷存活。
+struct CustomProgramRecord {
+    int effect_id = -1;
+    int skill_id = -1;
+    std::string kind;
+    std::string name_zh;
+    std::string unit_json;   // 有序 EffectUnit 序列(JSON)，模型离线编码，引擎直接加载
+    std::string memo;
+};
+
+struct CustomOverrideRecord {
+    int effect_id = -1;
+    std::string override_type;  // interpret_as_program | map_to | ignore | dead_column
+    std::string map_value;      // override_type 的载荷(目标effect_id / 模板 / 空)
+    std::string source_scope;   // moves|effect_icon|hide_moves|...
+    std::string rationale;      // 与官方差异的原因(存决策, 防下个会话当 bug 重查)
+};
+
 struct LearnableMoveRecord {
     int move_id = -1;
     int learning_level = 0;
@@ -131,6 +150,11 @@ public:
 
     std::optional<SkillRecord> load_skill(int move_id) const;
     std::vector<SkillEffectRecord> load_skill_effects(int move_id) const;
+
+    // ── 认证数据层（custom_* 表）────────────────────────────
+    // 表空时返回 nullopt；skills.cpp loadSkills 在"注册函数→运行时 parser"之前查这两处以作离线纠偏。
+    std::optional<CustomProgramRecord> load_custom_program(int effect_id, int skill_id) const;
+    std::optional<CustomOverrideRecord> load_custom_override(int effect_id) const;
 
     std::optional<int> find_monster_id_by_exact_name(const std::string& monster_name) const;
     std::optional<MonsterRecord> load_monster(int monster_id) const;
