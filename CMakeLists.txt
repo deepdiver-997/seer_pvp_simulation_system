@@ -70,92 +70,18 @@ if(BUILD_SMOKE_TEST)
     target_include_directories(sim_smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(sim_smoke_test PRIVATE sim_core)
 
-    # 场景化对战测试（每场景一个二进制；共用 test/scenario/scenario_harness.h）
-    add_executable(sim_scenario_a test/scenario/scenario_a.cpp)
-    target_include_directories(sim_scenario_a PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_a PRIVATE sim_core)
-
-    add_executable(sim_scenario_b test/scenario/scenario_b.cpp)
-    target_include_directories(sim_scenario_b PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_b PRIVATE sim_core)
-
-    add_executable(sim_scenario_c test/scenario/scenario_c.cpp)
-    target_include_directories(sim_scenario_c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_c PRIVATE sim_core)
-
-    add_executable(sim_scenario_d test/scenario/scenario_d.cpp)
-    target_include_directories(sim_scenario_d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_d PRIVATE sim_core)
-
-    add_executable(sim_scenario_e test/scenario/scenario_e.cpp)
-    target_include_directories(sim_scenario_e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_e PRIVATE sim_core)
-
-    add_executable(sim_scenario_f test/scenario/scenario_f.cpp)
-    target_include_directories(sim_scenario_f PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_f PRIVATE sim_core)
-
-    add_executable(sim_scenario_g test/scenario/scenario_g.cpp)
-    target_include_directories(sim_scenario_g PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_g PRIVATE sim_core)
-
-    add_executable(sim_scenario_h test/scenario/scenario_h.cpp)
-    target_include_directories(sim_scenario_h PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_h PRIVATE sim_core)
-
-    add_executable(sim_scenario_i test/scenario/scenario_i.cpp)
-    target_include_directories(sim_scenario_i PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_i PRIVATE sim_core)
-
-    add_executable(sim_scenario_j test/scenario/scenario_j.cpp)
-    target_include_directories(sim_scenario_j PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_j PRIVATE sim_core)
-
-    add_executable(sim_scenario_k test/scenario/scenario_k.cpp)
-    target_include_directories(sim_scenario_k PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_k PRIVATE sim_core)
-
-    add_executable(sim_scenario_l test/scenario/scenario_l.cpp)
-    target_include_directories(sim_scenario_l PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_l PRIVATE sim_core)
-
-    add_executable(sim_scenario_m test/scenario/scenario_m.cpp)
-    target_include_directories(sim_scenario_m PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_m PRIVATE sim_core)
-
-    add_executable(sim_scenario_n test/scenario/scenario_n.cpp)
-    target_include_directories(sim_scenario_n PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_n PRIVATE sim_core)
-
-    add_executable(sim_scenario_o test/scenario/scenario_o.cpp)
-    target_include_directories(sim_scenario_o PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_o PRIVATE sim_core)
-
-    add_executable(sim_scenario_p test/scenario/scenario_p.cpp)
-    target_include_directories(sim_scenario_p PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_p PRIVATE sim_core)
-
-    add_executable(sim_scenario_q test/scenario/scenario_q.cpp)
-    target_include_directories(sim_scenario_q PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_q PRIVATE sim_core)
-    add_executable(sim_scenario_r test/scenario/scenario_r.cpp)
-    target_include_directories(sim_scenario_r PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_r PRIVATE sim_core)
-    add_executable(sim_scenario_s test/scenario/scenario_s.cpp)
-    target_include_directories(sim_scenario_s PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_s PRIVATE sim_core)
-    add_executable(sim_scenario_t test/scenario/scenario_t.cpp)
-    target_include_directories(sim_scenario_t PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_t PRIVATE sim_core)
-    add_executable(sim_scenario_u test/scenario/scenario_u.cpp)
-    target_include_directories(sim_scenario_u PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_u PRIVATE sim_core)
-    add_executable(sim_scenario_v test/scenario/scenario_v.cpp)
-    target_include_directories(sim_scenario_v PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_v PRIVATE sim_core)
-    add_executable(sim_scenario_w test/scenario/scenario_w.cpp)
-    target_include_directories(sim_scenario_w PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(sim_scenario_w PRIVATE sim_core)
+    # 场景化对战测试：GLOB 自动发现 test/scenario/scenario_*.cpp，每个文件一个独立二进制。
+    # 命名约定：scenario_<三位序号>_<特性后缀>.cpp（如 scenario_023_selfdestruct_legacy.cpp）。
+    # 新增场景只需放一个文件 + 在 docs/07-工具与测试/场景测试说明.md 登记，无需改 CMake。
+    file(GLOB SCENARIO_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/scenario/scenario_*.cpp)
+    list(SORT SCENARIO_SOURCES)
+    foreach(scenario_src IN LISTS SCENARIO_SOURCES)
+        get_filename_component(scenario_name "${scenario_src}" NAME_WE)  # scenario_023_selfdestruct_legacy
+        add_executable(sim_${scenario_name} "${scenario_src}")
+        target_include_directories(sim_${scenario_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_link_libraries(sim_${scenario_name} PRIVATE sim_core)
+    endforeach()
 endif()
 
 if(BUILD_TRAINING_CLI)
