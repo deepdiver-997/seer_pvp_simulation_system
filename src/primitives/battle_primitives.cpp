@@ -377,6 +377,26 @@ HealResult heal(BattleContext* ctx, int target, int fraction_denom) {
     return HealResult::SUCCESS;
 }
 
+HealResult heal_amount(BattleContext* ctx, int target, int amount) {
+    if (!ctx || target < 0 || target > 1 || amount < 0) {
+        return HealResult::INVALID_PARAM;
+    }
+    heal_impl(ctx, target, amount);
+    return HealResult::SUCCESS;
+}
+
+void clear_stat_boosts(BattleContext* ctx, int target) {
+    if (!ctx || target < 0 || target > 1) {
+        return;
+    }
+    ElfPet& pet = ctx->getPet(target);
+    for (auto& lv : pet.levels) {  // 只清提升（正等级），不动弱化/负等级
+        if (lv > 0) {
+            lv = 0;
+        }
+    }
+}
+
 FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount) {
     if (!ctx || target < 0 || target > 1 || amount < 0) {
         return FixedDamageResult::INVALID_PARAM;

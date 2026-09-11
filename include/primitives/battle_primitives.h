@@ -194,6 +194,18 @@ enum class FixedDamageResult {
 HealResult heal(BattleContext* ctx, int target, int fraction_denom);
 
 /**
+ * heal_amount - 按具体数值恢复（吃封回血 + 恢复效果修正% + 记 last_heal）。
+ * 用于"恢复已损失体力的 1/2"这类非整比例恢复（amount 由调用方算好）。
+ */
+HealResult heal_amount(BattleContext* ctx, int target, int amount);
+
+/**
+ * clear_stat_boosts - 消除目标方正等级上的能力提升（"消除双方能力提升状态"）。
+ * 只清提升（等级 > 0 → 0），不动弱化/负等级。
+ */
+void clear_stat_boosts(BattleContext* ctx, int target);
+
+/**
  * fixed_damage - 固定伤害（复用 deal_damage，吃护盾/事件）。
  */
 FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount);

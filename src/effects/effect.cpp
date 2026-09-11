@@ -1,6 +1,7 @@
 #include <effects/effect.h>
 #include <fsm/battleContext.h>
 #include <plugin/plugin_interface.h>
+#include <plugin/core_api.h>
 
 #include <cstdlib>
 #include <algorithm>
@@ -144,7 +145,8 @@ void EffectFactory::ensureInitialized(const std::string& lib_dir) {
 
     // Now call registration functions (no locks held)
     for (auto& lib_fn : pending_libs) {
-        lib_fn.reg_fn(this);
+        PluginInitApi init{this, &core_api()};
+        lib_fn.reg_fn(&init);
         loaded_libraries_.push_back(std::move(lib_fn.lib));
     }
 
@@ -174,7 +176,8 @@ void EffectFactory::loadFromDynamicLibraries(const std::string& lib_dir) {
                     DLSymbol symbol = lib.getSymbol(kSkillPluginInitFn);
                     if (symbol) {
                         auto register_fn = reinterpret_cast<PluginRegisterFn>(symbol);
-                        register_fn(this);  // Pass 'this' as the registry
+                        PluginInitApi init{this, &core_api()};
+                        register_fn(&init);  // Pass registry + core 函数指针
                     }
                     // Keep library loaded by moving into our vector
                     loaded_libraries_.push_back(std::move(lib));
@@ -202,7 +205,8 @@ void EffectFactory::loadFromDynamicLibraries(const std::string& lib_dir) {
                 DLSymbol symbol = lib.getSymbol(kSkillPluginInitFn);
                 if (symbol) {
                     auto register_fn = reinterpret_cast<PluginRegisterFn>(symbol);
-                    register_fn(this);  // Pass 'this' as the registry
+                    PluginInitApi init{this, &core_api()};
+                    register_fn(&init);  // Pass registry + core 函数指针
                 }
                 // Keep library loaded by moving into our vector
                 loaded_libraries_.push_back(std::move(lib));

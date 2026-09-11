@@ -27,6 +27,7 @@ set(SIM_CORE_SOURCES
     src/effects/effect_unit.cpp
     src/effects/effect_unit_parser.cpp
     src/effects/effect_unit_loader.cpp
+    src/effects/core_api.cpp
     src/effects/pendingEffect.cpp
     src/effects/timed_bucket.cpp
     src/effects/skill_invalid_center.cpp
