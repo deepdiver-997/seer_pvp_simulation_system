@@ -289,7 +289,7 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 
 void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
                 int count, int duration_rounds, bool penetrable, int source_slot,
-                InvalidBinding binding) {
+                InvalidBinding binding, bool hit_invalid) {
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
@@ -298,8 +298,14 @@ void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, b
     }
 
     SkillArmor armor;
-    armor.kind = (attribute && attack) ? SkillArmor::Kind::SEAL_ALL
-               : (attack ? SkillArmor::Kind::SEAL_ATTACK : SkillArmor::Kind::SEAL_ATTRIBUTE);
+    // 命中失效语义(SEAL_ATTRIBUTE_HIT)只在"封属性技能"下有意义（官方命中失效封属即针对属性技能）。
+    if (hit_invalid && attribute && !attack) {
+        armor.kind = SkillArmor::Kind::SEAL_ATTRIBUTE_HIT;
+    } else if (attribute && attack) {
+        armor.kind = SkillArmor::Kind::SEAL_ALL;
+    } else {
+        armor.kind = attack ? SkillArmor::Kind::SEAL_ATTACK : SkillArmor::Kind::SEAL_ATTRIBUTE;
+    }
     armor.penetrable = penetrable;
     armor.source_effect_id = effect_id;
     // 回合型 / 次数型二选一（文档 §5.1）：有 duration 走回合型（响应不消耗，靠减扣点/断回合结束），

@@ -42,7 +42,8 @@ enum class SkillSelectionResult {
 enum class SkillUsageResult {
     OK,      // 可用
     MISS,    // 未命中（命中率判定失败）
-    SEALED,  // 被次数类拦截（封属性/封攻击，已消费次数）
+    SEALED,  // 被无效类拦截（盔/威/封属，已消费次数）→ SKILL_INVALID + 补偿
+    HIT_INVALID,  // 命中失效类拦截（SEAL_ATTRIBUTE_HIT）→ 技能照常命中、效果失效、无补偿
 };
 
 // SkillEffectNode - 技能分支中的单个注册节点

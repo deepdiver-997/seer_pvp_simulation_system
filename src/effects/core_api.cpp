@@ -12,6 +12,7 @@ const CoreApi& core_api() {
         /*heal_amount=*/&heal_amount,
         /*grant_guaranteed_first=*/&grant_guaranteed_first,
         /*stat_change=*/&stat_change,
+        /*seal_skill=*/&seal_skill,
     };
     return api;
 }

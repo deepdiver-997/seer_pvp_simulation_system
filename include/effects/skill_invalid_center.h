@@ -27,9 +27,11 @@ class BattleContext;
 // 一条无效记录的内容部分。
 struct SkillArmor {
     enum class Kind {
-        SEAL_ATTACK,     // 狮盔：只封攻击技能
-        SEAL_ALL,        // 龙威：封攻击 + 属性技能
-        SEAL_ATTRIBUTE,  // 封属：只封属性技能
+        SEAL_ATTACK,        // 狮盔：只封攻击技能（无效）
+        SEAL_ALL,           // 龙威：封攻击 + 属性技能（无效）
+        SEAL_ATTRIBUTE,     // 封属：只封属性技能（无效）
+        SEAL_ATTRIBUTE_HIT, // 封属·命中失效：只封属性技能，但只让"命中效果失效"、
+                            //   不触发 SKILL_INVALID 无效补偿（官方"令对手属性技能无效"表现类）。
     };
 
     Kind kind = Kind::SEAL_ATTACK;
@@ -45,12 +47,16 @@ struct SkillArmor {
     // 本条是否"响应"该技能类别的使用。
     bool responds_to(bool is_attribute_skill) const {
         switch (kind) {
-            case Kind::SEAL_ATTACK:    return !is_attribute_skill;
-            case Kind::SEAL_ATTRIBUTE: return is_attribute_skill;
-            case Kind::SEAL_ALL:       return true;
+            case Kind::SEAL_ATTACK:        return !is_attribute_skill;
+            case Kind::SEAL_ATTRIBUTE:
+            case Kind::SEAL_ATTRIBUTE_HIT: return is_attribute_skill;
+            case Kind::SEAL_ALL:           return true;
         }
         return false;
     }
+
+    // 命中失效语义（SEAL_ATTRIBUTE_HIT）：技能照常命中，但效果不被注册、不触发无效补偿。
+    bool is_hit_invalid() const { return kind == Kind::SEAL_ATTRIBUTE_HIT; }
 
     bool is_round_type() const { return remaining_rounds > 0; }
 };
@@ -69,6 +75,13 @@ struct InvalidEntry {
     InvalidBinding binding = InvalidBinding::SELF;
 };
 
+// 使用技能时一次遍历的全部响应结果（同一容器统一判定、统一消费）。
+enum class SkillInvalidNotifyResult {
+    NONE,        // 无条目响应 → 技能正常可用
+    INVALID,     // 有无效类条目响应（盔/威/封属）→ 技能被无效，走 SKILL_INVALID + 补偿分支
+    HIT_INVALID, // 仅命中失效类条目响应（SEAL_ATTRIBUTE_HIT）→ 技能照常命中、效果失效、无补偿
+};
+
 class SkillInvalidCenter {
 public:
     // 注册一条无效记录。同 (owner, source_slot, source_effect_id) → **覆盖**（刷新，不累加）。
@@ -76,12 +89,15 @@ public:
                         InvalidBinding binding);
 
     // 使用技能时通知：遍历被无效方的所有条目，让"响应此技能"的条目各减一次次数。
-    // 返回**是否有任一响应**（true = 本次技能无效 → 走 SKILL_INVALID 分支与补偿）。
+    // 无效类(盔/威/封属)与命中失效类(SEAL_ATTRIBUTE_HIT)**都在同一次遍历中消费次数**，
+    // 不因另一类先挡就保留——次数类条目同归于"全部消费"语义（文档 §2.3）。
+    // 返回三态：任一无效类响应 → INVALID；否则任一命中失效响应 → HIT_INVALID；否则 NONE。
     // - 条件不满足 → 跳过（保留）
     // - 可穿盔 && 技能带"无视攻击免疫" → 穿透跳过（保留次数）
     // - 回合类 → 响应但不消耗
-    bool notify(BattleContext* ctx, int owner, int attacker, bool is_attribute_skill,
-                int power, bool ignore_attack_immunity);
+    SkillInvalidNotifyResult notify(BattleContext* ctx, int owner, int attacker,
+                                    bool is_attribute_skill, int power,
+                                    bool ignore_attack_immunity);
 
     // 换宠清理：清掉 owner 方由 source_slot 注册的 SELF 条目（TEAM 的保留）。
     void clear_self_for_slot(int owner, int source_slot);

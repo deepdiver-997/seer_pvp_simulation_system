@@ -29,14 +29,17 @@ void SkillInvalidCenter::register_armor(int owner, int source_slot, const SkillA
     entries_[owner].push_back(InvalidEntry{owner, source_slot, armor, binding});
 }
 
-bool SkillInvalidCenter::notify(BattleContext* ctx, int owner, int attacker,
-                                bool is_attribute_skill, int power,
-                                bool ignore_attack_immunity) {
+SkillInvalidNotifyResult SkillInvalidCenter::notify(BattleContext* ctx, int owner, int attacker,
+                                                     bool is_attribute_skill, int power,
+                                                     bool ignore_attack_immunity) {
     if (!valid_owner(owner)) {
-        return false;
+        return SkillInvalidNotifyResult::NONE;
     }
 
-    bool any_responded = false;
+    // 最终结论：无效类优先于命中失效类（同一条属性技能若同时被龙威与封属·命中失效命中，
+    // 按"被无效"走 SKILL_INVALID 补偿；命中失效不覆盖无效）。两类条目的次数都在本次统一消费。
+    bool any_invalid = false;
+    bool any_hit_invalid = false;
     std::vector<InvalidEntry>& list = entries_[owner];
     for (auto it = list.begin(); it != list.end();) {
         InvalidEntry& entry = *it;
@@ -53,8 +56,12 @@ bool SkillInvalidCenter::notify(BattleContext* ctx, int owner, int attacker,
             continue;  // 可穿盔被穿透 → 保留次数（文档 §5.2）
         }
 
-        // 响应
-        any_responded = true;
+        // 响应：记类 + 消费次数（次数类条目同归于"全部消费"语义，两类不互相豁免）。
+        if (entry.armor.is_hit_invalid()) {
+            any_hit_invalid = true;
+        } else {
+            any_invalid = true;
+        }
         if (entry.armor.remaining_counts > 0) {
             --entry.armor.remaining_counts;
             if (entry.armor.remaining_counts <= 0) {
@@ -65,7 +72,13 @@ bool SkillInvalidCenter::notify(BattleContext* ctx, int owner, int attacker,
         // 回合类条目：响应但不消耗（靠减扣点 / 断回合结束）
         ++it;
     }
-    return any_responded;
+    if (any_invalid) {
+        return SkillInvalidNotifyResult::INVALID;
+    }
+    if (any_hit_invalid) {
+        return SkillInvalidNotifyResult::HIT_INVALID;
+    }
+    return SkillInvalidNotifyResult::NONE;
 }
 
 void SkillInvalidCenter::clear_self_for_slot(int owner, int source_slot) {

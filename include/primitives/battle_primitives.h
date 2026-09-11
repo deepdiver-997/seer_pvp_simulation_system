@@ -130,13 +130,19 @@ void deal_damage(BattleContext* ctx, int target, int amount,
  * @param count          次数型拦截次数（>0）
  * @param duration_rounds 回合型持续回合（>0 走回合型；0=次数型）
  * @param penetrable     可否被"无视攻击免疫"穿透（默认 true=可穿盔；false=条件盔/龙威）
+ * @param source_slot    注册精灵槽位（绑定自身时下场清理用；-1=未知）
+ * @param binding        SELF=换宠清理 / TEAM=切换保留
+ * @param hit_invalid    命中失效语义（默认 false）：true 且 attribute 时用 SEAL_ATTRIBUTE_HIT ——
+ *                       只封属性技能，但技能**照常命中、效果失效、不触发 SKILL_INVALID 补偿**
+ *                       （官方"令对手属性技能无效而表现的命中失效"一类，见 skill_invalid_center.h）。
  *
  * 注：拦截**没有**"免断"属性——免断是 owner 级的 `ImmunityType::BREAK`（免疫内核），
  *     由 `break_round_effects` 在入口统一查询，见技能判定流程与无效效果体系.md §二。
  */
 void seal_skill(BattleContext* ctx, int target, int effect_id, bool attribute, bool attack,
                 int count, int duration_rounds = 0, bool penetrable = true,
-                int source_slot = -1, InvalidBinding binding = InvalidBinding::SELF);
+                int source_slot = -1, InvalidBinding binding = InvalidBinding::SELF,
+                bool hit_invalid = false);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。

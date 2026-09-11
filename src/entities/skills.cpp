@@ -408,21 +408,26 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         }
     }
 
-    // ② 门判定（技能无效中心：盔 / 威 / 封属）。
-    // 文档 §2.3/§5.2 **全部消费**：一次技能使用会消耗**所有**响应它的次数类条目，
-    // 不因某个盔挡了另一个就保留次数。回合类条目响应但不消耗（靠减扣点/断回合结束）。
+    // ② 门判定（技能无效中心：盔 / 威 / 封属 / 封属·命中失效）。
+    // 文档 §2.3/§5.2 **全部消费**：一次技能使用会消耗**所有**响应它的次数类条目
+    // （无效类与命中失效类在同一次遍历中统一消费），不因某个盔挡了另一个就保留次数。
+    // 回合类条目响应但不消耗（靠减扣点/断回合结束）。
     // 穿透只绕"可穿盔"：条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。
     // 注：miss 分支已在 ① 提前 return —— 但那里**也要** notify（miss 同样消费可响应的次数类），
-    //     见下方 ① 的改动。
+    //     见下方 ① 的改动。miss 时该处返回被丢弃（走 MISS，不看命中失效）。
     const bool is_attribute = (type == SkillType::Attribute);
-    const bool responded = ctx->skill_invalid_center_.notify(
+    const SkillInvalidNotifyResult nr = ctx->skill_invalid_center_.notify(
         ctx, owner, owner, is_attribute, this->power,
         ctx->ws.attack_credential[owner].ignore_attack_immunity);
-    if (responded) {
-        return SkillUsageResult::SEALED;
+    switch (nr) {
+        case SkillInvalidNotifyResult::INVALID:
+            return SkillUsageResult::SEALED;      // 被无效（盔/威/封属）→ SKILL_INVALID + 补偿
+        case SkillInvalidNotifyResult::HIT_INVALID:
+            return SkillUsageResult::HIT_INVALID; // 命中失效（只封属性技能）→ 效果失效、无补偿
+        case SkillInvalidNotifyResult::NONE:
+        default:
+            return SkillUsageResult::OK;
     }
-
-    return SkillUsageResult::OK;
 }
 
 void Skills::register_usability_effect(int effectId, SkillUsabilityEffectType type, bool active) {
@@ -562,13 +567,22 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
         return {SkillExecResult::SKILL_INVALID, resolution_flags_for(SkillExecResult::SKILL_INVALID)};
     }
 
-    // 执行期可用性判定（统一走 query_usage：miss + 封属性/封攻击）
+    // 执行期可用性判定（统一走 query_usage：miss + 封属性/封攻击/命中失效）
     const SkillUsageResult usage = query_usage(ctx, owner);
     if (usage == SkillUsageResult::MISS || usage == SkillUsageResult::SEALED) {
         const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::SKILL_INVALID);
         ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_INVALID, owner, ctx->opponent(owner)});
         register_branch(ctx, owner, SkillExecResult::SKILL_INVALID, flags);
         return {SkillExecResult::SKILL_INVALID, flags};
+    }
+    // 命中失效（SEAL_ATTRIBUTE_HIT）：技能照常命中，但效果不被注册、不触发 SKILL_INVALID 补偿。
+    // 只由 SkillInvalidCenter 的门判定引起（仅封属性技能）；与下方 ③层 走同一 hit-invalid 执行路径
+    // （逐节点 nullify 过滤 + EVENT_HIT）。这里 **不 emit EVENT_SKILL_INVALID**、不注册无效补偿分支。
+    if (usage == SkillUsageResult::HIT_INVALID) {
+        const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::HIT);
+        register_branch(ctx, owner, SkillExecResult::HIT, flags, /*filter_hit_invalid=*/true);
+        ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner, ctx->opponent(owner)});
+        return {SkillExecResult::HIT, flags};
     }
 
     // 成功使用攻击技能 → 统一消费次数型穿透授予（"下一次攻击"语义：即使对手无阻挡也消费）。

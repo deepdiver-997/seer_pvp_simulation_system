@@ -33,6 +33,10 @@ struct CoreApi {
     void (*grant_guaranteed_first)(BattleContext*, int owner, int tier);
     // 能力等级变更（真实 pet.levels，持久；视层留 ws）。返回 SUCCESS/AT_CAP/INVALID_PARAM。
     StatChangeResult (*stat_change)(BattleContext*, int target, int stat, int delta);
+    // 挂"技能拦截"（盔/威/封属，含 hit_invalid 命中失效语义）。属性/攻击/次数/回合/binding 全部可配。
+    void (*seal_skill)(BattleContext*, int target, int effect_id, bool attribute, bool attack,
+                       int count, int duration_rounds, bool penetrable, int source_slot,
+                       InvalidBinding binding, bool hit_invalid);
 };
 
 // sim_core 暴露的 CoreApi 单例（实际填充）。插件侧不调它；由 core 在初始化时传入。
