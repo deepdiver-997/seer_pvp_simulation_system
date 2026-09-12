@@ -128,7 +128,8 @@ public:
 
     int grant_immune(int owner, int type, uint64_t coverage, uint64_t anomaly_mask,
                      int duration_rounds, int register_round, int source_id,
-                     bool soul, EffectScope scope, int source_slot) {
+                     bool soul, EffectScope scope, int source_slot,
+                     int counts = 0) {
         if (owner < 0 || owner > 1) {
             return -1;
         }
@@ -138,6 +139,7 @@ public:
                 if (t.source_id == source_id && t.category == RuleCategory::IMMUNE) {
                     t.register_round = register_round;
                     t.remaining_rounds = duration_rounds;
+                    t.remaining_counts = counts;   // 次数型免疫（>0：免下N次，is_immune 命中后 consume_immune 扣）
                     t.coverage = coverage;
                     t.anomaly_mask = anomaly_mask;
                     t.soul = soul;
@@ -154,6 +156,7 @@ public:
                 && t.subtype == type) {
                 t.register_round = register_round;
                 t.remaining_rounds = duration_rounds;
+                t.remaining_counts = counts;
                 t.coverage = coverage;
                 t.anomaly_mask = anomaly_mask;
                 t.soul = soul;
@@ -176,10 +179,42 @@ public:
         t.coverage = coverage;
         t.anomaly_mask = anomaly_mask;
         t.remaining_rounds = duration_rounds;  // IMMUNE 视为完整窗口（is_immune/cleanup 过期判断，不 tick）
+        t.remaining_counts = counts;           // 次数型免疫（>0）
         t.register_round = register_round;
         t.soul = soul;
         all_.push_back(std::move(t));
         return sid;
+    }
+
+    // 查询并消费**次数型**免疫（免疫"下N次"某威胁，如免下1次伤害/异常）。
+    // 与 is_immune（纯查询不消费）不同：命中 counts>0 的免疫 → counts-1（0 注销）并返回 true；
+    // 命中窗口/永久免疫（counts==0）→ 返回 false 不扣（那些不随施加消耗）。
+    // 调用方（deal_damage 免伤 / apply_anomaly 免异常）在 is_immune 命中后调它，若 true 说明是次数型被本次消耗。
+    bool consume_immune(int target, int type, uint64_t timing_bit, int current_round,
+                        int status_id = 0, int soul_filter = -1) {
+        if (target < 0 || target > 1) {
+            return false;
+        }
+        for (auto it = all_.begin(); it != all_.end(); ++it) {
+            RuleTicket& t = *it;
+            if (t.category != RuleCategory::IMMUNE || t.target != target) continue;
+            if (t.subtype != type || t.remaining_counts <= 0) continue;  // 仅次数型
+            if (soul_filter >= 0 && (t.soul ? 1 : 0) != soul_filter) continue;
+            if (t.remaining_rounds > 0 && current_round - t.register_round >= t.remaining_rounds) {
+                continue;
+            }
+            if (!(t.coverage & timing_bit)) continue;
+            if (type == static_cast<int>(ImmunityType::ANOMALY) && t.anomaly_mask != 0
+                && status_id >= 0 && !((t.anomaly_mask >> status_id) & 1u)) {
+                continue;
+            }
+            --t.remaining_counts;
+            if (t.remaining_counts <= 0) {
+                all_.erase(it);
+            }
+            return true;  // 本次免疫被消耗
+        }
+        return false;
     }
 
     void grant_seal(int source_owner, int source_slot, int source_effect_id, int target,
