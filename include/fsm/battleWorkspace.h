@@ -161,6 +161,9 @@ struct BattleWorkspace {
     // "不计算克制"设1、固定倍率直写）；<0 未设置 → 按 skill_element_view vs
     // 防御方元素计算。reset 须显式恢复 -1.0（memset 会清成 0）。
     double restraint_view[2];
+    // "攻击时不会出现微弱"（effect 760）：760 置位后，本次克制若 <1（微弱）→ 钳到 1（普通），
+    // 克制（>1）保持克制（区别于硬设 restraint_view=1 会连克制也削）。伤害公式在 restraint 算好后判断。
+    bool no_weakness[2]{};
 
     //========== 命中效果失效标记（③层，白板模式） ==========
     // execute 判定③层 kFullNull 时置位；ATTACK_DAMAGE 阶段据此把伤害归 0（白板）。

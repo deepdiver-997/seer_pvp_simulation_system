@@ -47,6 +47,8 @@ State effect_register_state(int effect_id) {
         case 8:
             return State::BATTLE_FIRST_ATTACK_DAMAGE;
         case 1256:  // 王·酷烈风息 "造成的伤害低于X"：需伤害结算后读 resolvedDamage.final
+        case 1221:  // 王·酷烈风息 "反转自身能力下降"：攻击技能**先结算伤害再反转**——
+                    // 反转不参与本次伤害（本次用反转前等级，提升留给下次），故伤害结算后操作 levels
             return State::BATTLE_FIRST_AFTER_ACTION;
         default:
             return State::BATTLE_FIRST_SKILL_EFFECT;

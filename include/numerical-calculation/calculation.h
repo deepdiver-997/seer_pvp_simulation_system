@@ -25,9 +25,13 @@ class Calculation {
         // - restraint_view >= 0 时直接覆盖（"不会出现微弱"钳到1、固定倍率直写）。
         // - 本系加成(involve) 仍用技能真实系别 skill.element（改系别只改克制、不改本系）。
         const auto& elem_view = ws.skill_element_view[attacker];
-        const double restraint = ws.restraint_view[attacker] >= 0.0
+        double restraint = ws.restraint_view[attacker] >= 0.0
             ? ws.restraint_view[attacker]
             : calculateRestraintMultiples(elem_view, ws.view_elementalAttributes[defender]);
+        // "不会出现微弱"(effect 760)：克制<1(微弱)→钳到1(普通)；克制(>1)保持克制，不被硬削。
+        if (ws.no_weakness[attacker] && restraint < 1.0) {
+            restraint = 1.0;
+        }
         damage = (0.84 * Attack / Defense * power + 2) * restraint
                 * (217 + rand() % 39) / 255;
         if(involve(ws.view_elementalAttributes[attacker], skill.element)) {
