@@ -339,6 +339,9 @@ StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta
         return StatChangeResult::AT_CAP;  // 到上限/下限，不变更
     }
     level = new_level;
+    // 同步到 ws 视图：伤害公式读 ws.view_levels（每回合从本体重基），回合内改本体必须同刷视图，
+    // 否则本体/视图分裂（如反转后 view 残留旧负值触 getTempAbilityValue 除零 → INT_MAX）。
+    ctx->ws.view_levels[target][stat] = new_level;
     return StatChangeResult::SUCCESS;
 }
 
@@ -417,9 +420,10 @@ StatReversalResult stat_reversal(BattleContext* ctx, int target) {
     //   （RuleCenter 回合类查询效果命中），应返回 BLOCKED 使反转失败。当前未接入，留作未来查询。
     ElfPet& pet = ctx->getPet(target);
     bool any_reversed = false;
-    for (auto& lv : pet.levels) {
-        if (lv < 0) {         // 只反下降（负等级）
-            lv = -lv;         // 下降 → 提升
+    for (int i = 0; i < 6; ++i) {
+        if (pet.levels[i] < 0) {    // 只反下降（负等级）
+            pet.levels[i] = -pet.levels[i];   // 下降 → 提升
+            ctx->ws.view_levels[target][i] = pet.levels[i];  // 同步 ws 视图（见 stat_change 注释）
             any_reversed = true;
         }
     }
