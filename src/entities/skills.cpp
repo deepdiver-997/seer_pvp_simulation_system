@@ -46,6 +46,8 @@ State effect_register_state(int effect_id) {
         case 6:
         case 8:
             return State::BATTLE_FIRST_ATTACK_DAMAGE;
+        case 1256:  // 王·酷烈风息 "造成的伤害低于X"：需伤害结算后读 resolvedDamage.final
+            return State::BATTLE_FIRST_AFTER_ACTION;
         default:
             return State::BATTLE_FIRST_SKILL_EFFECT;
     }
@@ -590,6 +592,7 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
     // EFFECT_INVALID（命中效果失效）也算成功使用 → 也消费。
     if (type != SkillType::Attribute) {
         ctx->consume_penetration_grants_after_attack(owner);
+        ctx->consume_attack_boost_grants_after_attack(owner);  // 次数型攻击增伤同步消费（"下1次攻击"语义）
     }
 
     // 命中效果失效③层：效果选择性注册（逐节点 nullify 过滤），伤害按模式处理。

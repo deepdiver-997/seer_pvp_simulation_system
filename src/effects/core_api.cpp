@@ -13,6 +13,8 @@ const CoreApi& core_api() {
         /*grant_guaranteed_first=*/&grant_guaranteed_first,
         /*stat_change=*/&stat_change,
         /*seal_skill=*/&seal_skill,
+        /*stat_reversal=*/&stat_reversal,
+        /*fixed_damage=*/&fixed_damage,
     };
     return api;
 }

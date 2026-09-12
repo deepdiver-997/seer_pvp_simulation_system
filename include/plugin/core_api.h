@@ -38,6 +38,10 @@ struct CoreApi {
     void (*seal_skill)(BattleContext*, int source, int target, int effect_id, bool attribute,
                        bool attack, int count, int duration_rounds, bool penetrable,
                        int source_slot, EffectScope scope, bool hit_invalid);
+    // 反转目标自身能力下降（负等级→提升）。区别于 clear_stat_boosts（消除提升）。
+    StatReversalResult (*stat_reversal)(BattleContext*, int target);
+    // 固定伤害（吃护盾/事件，复用 deal_damage）。返回"发生了什么"。
+    FixedDamageResult (*fixed_damage)(BattleContext*, int target, int amount);
 };
 
 // sim_core 暴露的 CoreApi 单例（实际填充）。插件侧不调它；由 core 在初始化时传入。

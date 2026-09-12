@@ -209,8 +209,26 @@ HealResult heal_amount(BattleContext* ctx, int target, int amount);
  * clear_stat_boosts - 消除目标方正等级上的能力提升（"消除双方能力提升状态"）。
  * 只清提升（等级 > 0 → 0），不动弱化/负等级。
  * 返回清掉的提升个数（0 = 目标本无提升 = "消强未成功"，调用方可据此决定后续分支，如"消强成功→必先"）。
+ * ⚠️ 与 stat_reversal（反转下降→提升）**语义不同**，不能混用：这是"消除"，那个是"翻转"。
  */
 int clear_stat_boosts(BattleContext* ctx, int target);
+
+/**
+ * stat_reversal - 反转目标自身的**能力下降**（负等级 → 正等级），不动已存在的提升。
+ * 与 clear_stat_boosts（消除提升）互补且独立：反转是"下降翻成提升"，只作用于负等级。
+ *
+ * @param target 被反转方（通常是施放方自身）
+ * @return REVERSED（有下降被翻转为提升）/ NO_DROP（目标本无下降，无反转）/ BLOCKED（禁止反转阻断——预留）
+ *
+ * ⚠️ TODO（用户约定）：**禁止反转**（令能力下降不被反转的回合类规则）——当前引擎的"回合类查询效果"
+ *   若允许命中 target，会令反转失败（返回 BLOCKED）。此处先不做，留作未来按 RuleCenter 查询接入。
+ */
+enum class StatReversalResult {
+    REVERSED,
+    NO_DROP,
+    BLOCKED,   // 预留：禁止反转（TODO 未接入）
+};
+StatReversalResult stat_reversal(BattleContext* ctx, int target);
 
 /**
  * grant_guaranteed_first - 授予"下一回合必定先出手"（必先，分等级）。

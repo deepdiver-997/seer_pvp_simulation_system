@@ -339,6 +339,17 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
     // base 为原始伤害；减伤不再在此同步结算，改由 DamagePipeline 的 REDUCE 阶段施加
     // （install_default_damage_reduction 注册，可被 damage_suppress_mask 抑制）。
     snapshot.base = std::max(0, Calculation::calculateDamage(attacker_id, ctx->ws, skill));
+    // 次数型攻击增伤（attack_boost_grants，"下N次攻击伤害提升X%"）：累加该攻击方所有 active 增伤 %。
+    // 成功后由 consume_attack_boost_grants_after_attack 消费（见 skills.cpp），此处只累加不扣次数。
+    {
+        int boost_sum = 0;
+        for (const auto& g : ctx->attack_boost_grants[attacker_id]) {
+            boost_sum += g.pct;
+        }
+        if (boost_sum > 0) {
+            snapshot.base = snapshot.base * (100 + boost_sum) / 100;
+        }
+    }
     // 暴击：roll 命中 → 按暴击倍率放大 base（在减伤管线之前）。暴击抗性削减"加成"部分
     // （如 2 倍暴击 + 50% 暴击抗性 → 1.5 倍）。crit_rate 默认 0（官方 crit_rate 未接入）。
     const float crit_rate = skill.critical_strike_rate * ctx->ws.crit_rate_mod[attacker_id];

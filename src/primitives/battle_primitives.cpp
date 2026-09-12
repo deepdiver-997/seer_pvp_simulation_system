@@ -407,6 +407,25 @@ int clear_stat_boosts(BattleContext* ctx, int target) {
     return cleared;  // 0 = 目标本无提升（消强未成功）
 }
 
+// 反转目标的能力下降：负等级 → 正等级（下降翻成提升），不动已有提升。
+// 与 clear_stat_boosts（消除提升）独立——"反转"不等于"消除"。
+StatReversalResult stat_reversal(BattleContext* ctx, int target) {
+    if (!ctx || target < 0 || target > 1) {
+        return StatReversalResult::NO_DROP;
+    }
+    // TODO（禁止反转，用户约定）：若 target 身上存在"禁止反转下降"的回合类规则
+    //   （RuleCenter 回合类查询效果命中），应返回 BLOCKED 使反转失败。当前未接入，留作未来查询。
+    ElfPet& pet = ctx->getPet(target);
+    bool any_reversed = false;
+    for (auto& lv : pet.levels) {
+        if (lv < 0) {         // 只反下降（负等级）
+            lv = -lv;         // 下降 → 提升
+            any_reversed = true;
+        }
+    }
+    return any_reversed ? StatReversalResult::REVERSED : StatReversalResult::NO_DROP;
+}
+
 namespace {
 
 // 必先授予效果：在先手权时点把 ws.guaranteed_first[owner] 置为 tier。

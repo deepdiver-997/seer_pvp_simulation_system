@@ -91,12 +91,20 @@ public:
     struct PenetrationGrant {
         int owner = -1;
         int remaining = 0;         // 剩余次数
-        int level = 1;             // 穿透等级（最小门只用 1）
-        bool ignore_attack_immunity = false;  // 699 语义
-        bool ignore_damage_limit = false;     // 697 语义
-        int source_id = -1;        // 来源（技能/魂印 id）
+        int level = 0;
+        bool ignore_attack_immunity = false;
+        bool ignore_damage_limit = false;
+        int source = -1;
     };
     std::vector<PenetrationGrant> penetration_grants[2];  // [授予方]
+        //--- 次数型攻击伤害增伤（"自身下N次攻击造成的伤害提升X%"类，31272王·酷烈风息 1256）---
+    // 跨回合持久；成功使用攻击技能后消费（remaining-1，0 移除）。伤害结算累加该方 pct。
+    struct AttackDamageBoost {
+        int source_effect_id = -1;
+        int remaining = 0;   // 剩余次数
+        int pct = 0;         // 增伤 %（100 = 翻倍）
+    };
+    std::vector<AttackDamageBoost> attack_boost_grants[2];  // [授予方]
 
     //--- 魂印条件凭证信号（SET 端：魂印激活时设置，切换/清场清零）---
     bool force_execute_on_pp0[2]{};  // 魂印激活：使用 PP=0 技能时必定命中+强制执行（无为觉者 2260）
@@ -286,6 +294,31 @@ public:
         }
     }
 
+    //--- 次数型攻击伤害增伤（"下N次攻击伤害提升X%"）────────────────
+    // 插件可调 inline；伤害结算(stage_simple_attack_damage)对该方累加 pct，攻击后消费。
+    void grant_attack_boost(int owner, int source_effect_id, int count, int pct) {
+        if (owner < 0 || owner > 1 || count <= 0 || pct <= 0) {
+            return;
+        }
+        attack_boost_grants[owner].push_back(AttackDamageBoost{source_effect_id, count, pct});
+    }
+
+    // 成功使用攻击技能后消费：每槽 remaining-1，0 移除（与 penetration_grants 同步）。
+    void consume_attack_boost_grants_after_attack(int owner) {
+        if (owner < 0 || owner > 1) {
+            return;
+        }
+        auto& grants = attack_boost_grants[owner];
+        for (auto it = grants.begin(); it != grants.end();) {
+            --it->remaining;
+            if (it->remaining <= 0) {
+                it = grants.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     //--- 技能无效条目授予（内联入口，仿 grant_immunity）---
     // 插件动态库不链接 sim_core（CLAUDE.md 3.9），seal_skill 原语非 inline 调不了——
     // 这是插件挂"盔/威/封属"的唯一入口。统一语义对齐 seal_skill：
@@ -357,6 +390,7 @@ public:
         skills_effects.reset_round_count(owner);
         soul_mark_effects.reset_round_count(owner);
         penetration_grants[owner].clear();  // 次数型穿透授予不继承给新精灵
+        attack_boost_grants[owner].clear();  // 次数型攻击增伤不继承给新精灵
         force_execute_on_pp0[owner] = false;  // 魂印条件信号不继承给新精灵（待新魂印重新激活）
         ignore_pp[owner] = false;
         pp_reverse[owner] = false;
@@ -385,6 +419,8 @@ public:
         pending_effects.clear();
         penetration_grants[0].clear();
         penetration_grants[1].clear();
+        attack_boost_grants[0].clear();
+        attack_boost_grants[1].clear();
         force_execute_on_pp0[0] = false;
         force_execute_on_pp0[1] = false;
         ignore_pp[0] = false;
