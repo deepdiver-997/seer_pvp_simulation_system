@@ -127,8 +127,7 @@ public:
     int  heal_mod_pct[2]{};    // 恢复效果修正%（正=提升，负=降低；封回血=-100 等价），heal 原语应用
 
     //--- 反弹/转化异常（on-stage 作用域）---
-    bool reflect_anomaly[2]{};                        // 弹控：免疫异常时反弹给施放方（最多反弹 1 次防打乒乓球）
-    std::array<std::map<int, int>, 2> anomaly_conversion;  // [目标] 入异常 id → 出异常 id（单跳转换）
+    std::array<std::map<int, int>, 2> anomaly_conversion;  // [目标] 入异常 id → 出异常 id（单跳转换），apply_anomaly 内查询
 
     //--- 场下源抑制场域（薇尔诗 2513，双方通用）---
     // "自身存活于出战阵容时，双方场下的精灵无法指定场上精灵为效果对象"（effect_icon 2098）。
@@ -298,8 +297,10 @@ public:
         if (source < 0 || source > 1 || target < 0 || target > 1) {
             return;
         }
+        // source_valid_id = 来源效果 epoch：封属随授予它的回合类效果被断 → 一并作废。
         rule_center_.grant_seal(source, source_slot, effect_id, target, kind, counts,
-                                rounds, penetrable);  // scope 默认 ON_STAGE
+                                rounds, penetrable, scope, /*condition=*/nullptr,
+                                round_effect_valid_id[source]);
     }
 
     //--- 伤害抗性有效视图 ---
@@ -371,8 +372,7 @@ public:
         pink_reduce_pct[owner] = 0;
         pink_to_true[owner] = false;
         heal_mod_pct[owner] = 0;             // 恢复效果修正不继承
-        reflect_anomaly[owner] = false;      // 弹控不继承
-        anomaly_conversion[owner].clear();   // 异常转化规则不继承
+        anomaly_conversion[owner].clear();   // 异常转化规则不继承（镜像：弹控已并入 RuleCenter REFLECT，随切回清）
         elf_element_view_bound_slot[owner] = -1;  // 新精灵下次 sync 重基系别
     }
 
@@ -395,7 +395,6 @@ public:
         pink_reduce_pct[0] = pink_reduce_pct[1] = 0;
         pink_to_true[0] = pink_to_true[1] = false;
         heal_mod_pct[0] = heal_mod_pct[1] = 0;
-        reflect_anomaly[0] = reflect_anomaly[1] = false;
         anomaly_conversion[0].clear();
         anomaly_conversion[1].clear();
         block_offstage_to_onstage = false;   // 场下源抑制场域（2513）战斗结束清
@@ -442,6 +441,8 @@ public:
         ++round_effect_valid_id[robotId];
         skills_effects.reset_round_count(robotId);
         soul_mark_effects.reset_round_count(robotId);
+        // Q2：来源 ON_STAGE 效果被断作废 → 其授予的非免疫规则一并作废（免疫豁免）。
+        rule_center_.invalidate_stale(robotId, round_effect_valid_id[robotId]);
     }
 
     /**

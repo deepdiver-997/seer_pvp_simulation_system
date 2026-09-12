@@ -87,7 +87,7 @@ static ApplyAnomalyResult apply_anomaly_impl(BattleContext* ctx,
 
     // 弹控：目标免疫时把异常反弹给施放方。最多反弹 1 次（depth==1 不再弹）——防双方弹控打乒乓球。
     const auto reflect = [&]() -> ApplyAnomalyResult {
-        if (reflect_depth == 0 && ctx->reflect_anomaly[target]
+        if (reflect_depth == 0 && ctx->rule_center_.has_reflect(target)
             && actor >= 0 && actor != target) {
             apply_anomaly_impl(ctx, actor, anomaly_id, duration_rounds,
                                /*actor=*/target, /*reflect_depth=*/1);
@@ -308,10 +308,12 @@ void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool 
     // 响应不消耗，靠 tick/断回合结束）；否则走次数型（响应即减，减到 0 注销）。
     if (duration_rounds > 0) {
         ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
-                                     /*counts=*/0, duration_rounds, penetrable, scope);
+                                     /*counts=*/0, duration_rounds, penetrable, scope,
+                                     /*condition=*/nullptr, ctx->round_effect_valid_id[source]);
     } else {
         ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
-                                     count, /*rounds=*/0, penetrable, scope);
+                                     count, /*rounds=*/0, penetrable, scope,
+                                     /*condition=*/nullptr, ctx->round_effect_valid_id[source]);
     }
 }
 

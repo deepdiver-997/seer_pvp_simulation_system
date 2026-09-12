@@ -50,9 +50,10 @@ enum class ImmunityType {
 
 // 规则大类。细分在 subtype(见 RuleTicket)：
 enum class RuleCategory {
-    IMMUNE,      // 免疫(纯查询不消费)：subtype=ImmunityType + coverage/mask/soul
-    SEAL,        // 盔/威/封属/命中失效(响应即消费)：subtype=SealKind
+    IMMUNE,      // 免疫(纯查询不消费)：subtype=ImmunityType + coverage/mask/soul。**天然不可被断**（source_valid_id 恒 0，只随上下场清）
+    SEAL,        // 盔/威/封属/命中失效(响应即消费)：subtype=SealKind。随来源效果被断作废
     HIT_INVALID, // ③层命中效果失效(防御方按次生效)：subtype=HitInvalidMode
+    REFLECT,     // 回弹：target 免疫异常时反弹给施放方(apply_anomaly 反射)。支持 counts/rounds/source 锚
 };
 
 // 封属类别(subtype for SEAL)。含"命中失效"变体(SEAL_ATTRIBUTE_HIT：属性技能照常命中、
@@ -72,6 +73,8 @@ struct RuleTicket {
     int source_effect_id = -1;     // 来源效果 id（覆盖键的一部分 + 审计）
     EffectScope scope = EffectScope::ON_STAGE;  // ON_STAGE=上场精灵(换宠清)；TEAM=全队保留
     int source_id = 0;             // 授予句柄（revoke / 快照 re-grant 复用用）
+    int source_valid_id = 0;       // 来源效果 epoch（注册时 ctx->round_effect_valid_id[source_owner]）。
+                                   // 0 = 不参与断回合作废（免疫天然豁免）。随来源效果被断回作废（Q2）。
 
     // ── 生效维度（"作用于"谁）────────────────────────────
     int target = -1;               // 免疫=被护方自身(source==target)；封属/③层=被封锁方
@@ -182,7 +185,8 @@ public:
     void grant_seal(int source_owner, int source_slot, int source_effect_id, int target,
                     SealKind kind, int counts, int rounds, bool penetrable,
                     EffectScope scope = EffectScope::ON_STAGE,
-                    std::function<bool(BattleContext*, int, int)> condition = nullptr) {
+                    std::function<bool(BattleContext*, int, int)> condition = nullptr,
+                    int source_valid_id = 0) {
         // 允许次数型(counts>0)或回合型(rounds>0)，至少其一（回合型正常 counts=0）。
         if (source_owner < 0 || source_owner > 1 || target < 0 || target > 1
             || (counts <= 0 && rounds <= 0)) {
@@ -200,6 +204,8 @@ public:
                 t.remaining_rounds = rounds;
                 t.penetrable = penetrable;
                 t.condition = std::move(condition);
+                t.source_valid_id = source_valid_id;  // 来源效果被断→随断回作废
+                recount();
                 return;
             }
         }
@@ -215,11 +221,14 @@ public:
         t.remaining_counts = counts;
         t.remaining_rounds = rounds;
         t.condition = std::move(condition);
+        t.source_valid_id = source_valid_id;
         all_.push_back(std::move(t));
+        recount();
     }
 
     void grant_hit_invalid(int target, int source_slot, int source_effect_id, int mode,
-                           int count, EffectScope scope = EffectScope::ON_STAGE) {
+                           int count, EffectScope scope = EffectScope::ON_STAGE,
+                           int source_valid_id = 0) {
         if (target < 0 || target > 1 || count <= 0) {
             return;
         }
@@ -230,6 +239,7 @@ public:
                 t.source_slot = source_slot;
                 t.scope = scope;
                 t.remaining_counts = count;
+                t.source_valid_id = source_valid_id;
                 return;
             }
         }
@@ -242,6 +252,7 @@ public:
         t.category = RuleCategory::HIT_INVALID;
         t.subtype = mode;
         t.remaining_counts = count;
+        t.source_valid_id = source_valid_id;
         all_.push_back(std::move(t));
     }
 
@@ -327,6 +338,59 @@ public:
         return SkillInvalidNotifyResult::NONE;
     }
 
+    // ── 回弹（免疫命中时反弹给施放方）──────────────────
+    void grant_reflect(int source_owner, int source_slot, int source_effect_id, int target,
+                       int rounds, EffectScope scope = EffectScope::ON_STAGE,
+                       int source_valid_id = 0) {
+        if (source_owner < 0 || source_owner > 1 || target < 0 || target > 1) {
+            return;
+        }
+        RuleTicket t;
+        t.source_owner = source_owner;
+        t.source_slot = source_slot;
+        t.source_effect_id = source_effect_id;
+        t.scope = scope;
+        t.target = target;
+        t.category = RuleCategory::REFLECT;
+        t.remaining_rounds = rounds;   // 回弹目前仅回合类（0=本回合持续）；counts 可后续扩
+        t.register_round = 0;
+        t.source_valid_id = source_valid_id;
+        all_.push_back(std::move(t));
+        recount();
+    }
+    bool has_reflect(int target) const {
+        if (target < 0 || target > 1) {
+            return false;
+        }
+        for (const RuleTicket& t : all_) {
+            if (t.category == RuleCategory::REFLECT && t.target == target) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ── 断回合作废（Q2）：作废"来源 ON_STAGE 效果已被断"的非免疫规则────
+    // source_valid_id 注册时记 round_effect_valid_id[source_owner]；断回回合(++ epoch)后，
+    // 来源效果被作废，其授予的非免疫规则一并作废。IMMUNE 恒 0 天然豁免（不断回合清）。
+    void invalidate_stale(int source_owner, int current_epoch) {
+        if (source_owner < 0 || source_owner > 1) {
+            return;
+        }
+        // 只作废旧**回合类**规则（与 clear_round_type"断回合操作回合类"一致，次数型封属不随断回清）。
+        // 由来源 ON_STAGE 回合类效果授予时随其 epoch 作废；免疫恒 0 天然豁免。
+        std::erase_if(all_, [source_owner, current_epoch](RuleTicket& t) {
+            if (t.source_owner != source_owner || t.scope != EffectScope::ON_STAGE) {
+                return false;  // TEAM / 非本方：豁免
+            }
+            if (t.category == RuleCategory::IMMUNE || !t.is_round_type()) {
+                return false;  // 免疫天然不可被断；非回合类规则不随断回清
+            }
+            return t.source_valid_id > 0 && t.source_valid_id < current_epoch;
+        });
+        recount();
+    }
+
     std::optional<int> consume_hit_invalid(int defender) {
         if (defender < 0 || defender > 1) {
             return std::nullopt;
@@ -358,6 +422,7 @@ public:
             if (t.scope != EffectScope::ON_STAGE) return false;
             return source_slot == -1 || t.source_slot == -1 || t.source_slot == source_slot;
         });
+        recount();
     }
 
     void clear_round_type(int source) {
@@ -366,18 +431,20 @@ public:
         }
         std::erase_if(all_, [source](const RuleTicket& t) {
             return t.source_owner == source
-                && t.category == RuleCategory::SEAL && t.is_round_type();
+                && t.category != RuleCategory::IMMUNE && t.is_round_type();
         });
+        recount();
     }
 
     void tick_rounds() {
         std::erase_if(all_, [](RuleTicket& t) {
-            if (t.category != RuleCategory::SEAL || !t.is_round_type()) {
+            if (t.category == RuleCategory::IMMUNE || !t.is_round_type()) {
                 return false;
             }
             --t.remaining_rounds;
             return t.remaining_rounds <= 0;
         });
+        recount();
     }
 
     void cleanup(int current_round) {
@@ -386,11 +453,13 @@ public:
                 && t.remaining_rounds > 0
                 && current_round - t.register_round >= t.remaining_rounds;
         });
+        recount();
     }
 
     void clear_all() {
         all_.clear();
         next_source_id_ = 1;
+        recount();
     }
 
     bool empty() const { return all_.empty(); }
@@ -404,23 +473,25 @@ public:
         }
         return sum;
     }
+    // O(1)：回合类非免疫规则计数（断回合"有无可断物"门 + 断回作废查询，学 timed_bucket active_round_count_）。
     bool has_round_type(int source) const {
-        if (source < 0 || source > 1) {
-            return false;
-        }
-        for (const RuleTicket& t : all_) {
-            if (t.source_owner == source
-                && t.category == RuleCategory::SEAL && t.is_round_type()) {
-                return true;
-            }
-        }
-        return false;
+        return source >= 0 && source <= 1 && round_count_[source] > 0;
     }
     std::size_t size() const { return all_.size(); }
     const std::vector<RuleTicket>& entries() const { return all_; }
 
 private:
+    // 回合类（非 IMMUNE，is_round_type）规则计数，per-owner。见 has_round_type。
+    void recount() {
+        round_count_[0] = round_count_[1] = 0;
+        for (const RuleTicket& t : all_) {
+            if (t.category != RuleCategory::IMMUNE && t.is_round_type()) {
+                ++round_count_[t.source_owner];
+            }
+        }
+    }
     int next_source_id_ = 1;
+    int round_count_[2]{0, 0};
     std::vector<RuleTicket> all_;
 };
 
