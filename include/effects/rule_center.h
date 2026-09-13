@@ -126,10 +126,15 @@ public:
     RuleCenter(const RuleCenter&) = delete;
     RuleCenter& operator=(const RuleCenter&) = delete;
 
+    // source_effect_id：**覆盖键的来源维度**（默认 -1 = 匿名来源）。
+    // 覆盖键 = (source_owner, source_effect_id, IMMUNE, subtype) —— "同来源同效果覆盖、不追加"。
+    // ⚠️ 来源不区分时（全传 -1），同一精灵身上**同类型的免疫只能有一条**：
+    //    "窗口类免控 + 次数型次免"这类并存会被后者覆盖掉前者的窗口。
+    //    需要并存的调用方传各自的 effect_id（如技能 effect id / 魂印 id）即可各占一条。
     int grant_immune(int owner, int type, uint64_t coverage, uint64_t anomaly_mask,
                      int duration_rounds, int register_round, int source_id,
                      bool soul, EffectScope scope, int source_slot,
-                     int counts = 0) {
+                     int counts = 0, int source_effect_id = -1) {
         if (owner < 0 || owner > 1) {
             return -1;
         }
@@ -149,10 +154,11 @@ public:
                 }
             }
         }
-        // ② 覆盖键（同 source_owner + subtype=type）刷新：同 type 覆盖、不同 type 各占一条（903）。
+        // ② 覆盖键（source_owner + source_effect_id + subtype）刷新：同来源同 type 覆盖、
+        //    不同 type 各占一条（903 免异常/免弱）、不同来源各占一条。
         for (RuleTicket& t : all_) {
             if (t.category == RuleCategory::IMMUNE
-                && t.source_owner == owner && t.source_effect_id == -1
+                && t.source_owner == owner && t.source_effect_id == source_effect_id
                 && t.subtype == type) {
                 t.register_round = register_round;
                 t.remaining_rounds = duration_rounds;
@@ -170,7 +176,7 @@ public:
         RuleTicket t;
         t.source_owner = owner;
         t.source_slot = source_slot;
-        t.source_effect_id = -1;
+        t.source_effect_id = source_effect_id;
         t.scope = scope;
         t.source_id = sid;
         t.target = owner;              // 免疫单对象：被护方自身(source==target)
@@ -189,7 +195,12 @@ public:
     // 查询并消费**次数型**免疫（免疫"下N次"某威胁，如免下1次伤害/异常）。
     // 与 is_immune（纯查询不消费）不同：命中 counts>0 的免疫 → counts-1（0 注销）并返回 true；
     // 命中窗口/永久免疫（counts==0）→ 返回 false 不扣（那些不随施加消耗）。
-    // 调用方（deal_damage 免伤 / apply_anomaly 免异常）在 is_immune 命中后调它，若 true 说明是次数型被本次消耗。
+    //
+    // ⚠️ 本方法**跳过 counts==0 的窗口条目**继续往后扫，而不是"命中 is_immune 的那一条"。
+    //    这是官方规则（docs/02-效果系统/官方机制理解与引擎缺口对照.md §二，idx=418 第2条）：
+    //    **存在回合类免控/弹控时，次免依旧正常消耗**——窗口类免疫挡下不等于次免没被消耗。
+    //    调用方只需保证"威胁确实落到该精灵头上"（如 apply_anomaly 只在 reflect_depth==0 时调、
+    //    伤害管线只在 BLOCK 未被抑制时调），不要按"谁挡下的"来决定是否扣次数。
     bool consume_immune(int target, int type, uint64_t timing_bit, int current_round,
                         int status_id = 0, int soul_filter = -1) {
         if (target < 0 || target > 1) {

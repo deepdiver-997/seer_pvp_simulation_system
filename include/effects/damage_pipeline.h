@@ -22,6 +22,7 @@ enum class DamagePhase {
     REDUCE,        // 减伤（防御）
     FLOOR,         // 保底（最低伤害）
     CAP,           // 锁伤（最高伤害）
+    BLOCK,         // 挡伤/免伤归零（防御：次数免伤、"免疫下1次攻击伤害"）
     DETECT,        // 挡伤检测/触发（如 受高伤回血、反伤）
     FINAL_CORRECT, // 最终修正（归零/不可击穿的锁伤）
 };
@@ -29,14 +30,20 @@ enum class DamagePhase {
 /**
  * DamageEffectCategory - 伤害效果类别（用于按类别抑制）
  *
- * 沧岚"使对手挡伤失效" = 置对手 `damage_suppress_mask |= MITIGATE|DETECT`，
- * 该对手所有 MITIGATE/DETECT 类别的伤害效果在 walk 时被跳过（含检测归零的回血）。
- * 增伤（AMP）不受影响。新效果声明类别即可被同类抑制自动覆盖，无两两硬编码。
+ * ⚠️ 减伤(MITIGATE) 与 挡伤(BLOCK) **必须分开**：官方口径下"使对手挡伤失效"
+ *    （怒涛·沧岚 蚀砚之泪≥4滴）只废掉**归零类**（免伤/挡伤/弹伤/受高伤转化），
+ *    **减伤不被无视**（"减伤100%、点数减伤全都是不能被无视的效果"）。
+ *
+ * 蚀砚之泪≥4滴 = 置对手 `damage_suppress_mask |= BLOCK|DETECT`，
+ * 该对手所有 BLOCK/DETECT 类别的伤害效果在 walk 时被跳过。
+ * 增伤（AMP）与减伤（MITIGATE）不受影响。新效果声明类别即可被同类抑制自动覆盖，
+ * 无两两硬编码。
  */
 enum class DamageEffectCategory {
     AMP,      // 增伤（进攻）
-    MITIGATE, // 减伤/挡伤（防御：减伤、保底、锁伤）
-    DETECT,   // 检测/触发（防御：受高伤回血、反伤）
+    MITIGATE, // 减伤/保底/锁伤（防御，数值削减）—— **不可被"挡伤失效"无视**
+    BLOCK,    // 挡伤/免伤归零（防御：完全挡下本次伤害）—— 可被"挡伤失效"无视
+    DETECT,   // 检测/触发（防御：受高伤回血、反伤、转化体力）—— 可被"挡伤失效"无视
 };
 
 struct DamageEffect {
@@ -53,7 +60,7 @@ struct DamageEffect {
  */
 class DamagePipeline {
 public:
-    static constexpr int kPhaseCount = 6;
+    static constexpr int kPhaseCount = 7;
 
     DamagePipeline() = default;
     DamagePipeline(const DamagePipeline&) = delete;
@@ -87,6 +94,7 @@ public:
         DamagePhase::REDUCE,
         DamagePhase::FLOOR,
         DamagePhase::CAP,
+        DamagePhase::BLOCK,
         DamagePhase::DETECT,
         DamagePhase::FINAL_CORRECT,
     };

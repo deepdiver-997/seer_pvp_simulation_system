@@ -132,6 +132,7 @@ void BattleContext::init_battle() {
     roundChoice[1][0] = -1;
     roundChoice[1][1] = -1;
     install_default_damage_reduction();
+    install_default_damage_block();
 }
 
 void BattleContext::install_default_damage_reduction() {
@@ -156,6 +157,45 @@ void BattleContext::install_default_damage_reduction() {
                     ctx->damage_reduce_add[defender],
                     ctx->damage_reduce_mul[defender]
                 );
+            }
+        );
+    }
+}
+
+void BattleContext::install_default_damage_block() {
+    for (int owner = 0; owner < 2; ++owner) {
+        // 挡伤归零只对"防御方"生效。管线在 BLOCK 阶段先后走攻击方/防御方两个桶，
+        // 因此回调里用 resolvedDamage.defenderId 判断当前桶 owner 是否为防御方。
+        // BLOCK 类别 → 可被 damage_suppress_mask 抑制（蚀砚之泪≥4滴"挡伤失效"）。
+        register_damage_effect(
+            DamagePhase::BLOCK,
+            owner,
+            DamageEffectCategory::BLOCK,
+            [](BattleContext* ctx, int bucket_owner) {
+                if (!ctx) {
+                    return;
+                }
+                DamageSnapshot& damage = ctx->resolvedDamage;
+                const int defender = damage.defenderId;
+                if (defender < 0 || defender > 1 || bucket_owner != defender) {
+                    return;
+                }
+                if (!damage.isRed || damage.final <= 0) {
+                    return;  // 只挡红伤（技能攻击伤害），已被挡下的不重复处理
+                }
+                // 次数型免伤（"免疫下N次攻击伤害"）：纯查询命中才消费——非次数型（窗口/永久）
+                // 命中也不扣，故两个调用都要走。
+                if (!ctx->is_immune(defender, ImmunityType::DAMAGE, ctx->currentState)) {
+                    return;
+                }
+                ctx->consume_immune(defender, ImmunityType::DAMAGE, ctx->currentState);
+                // 完全挡下：整段快照归零（不只 final——下游若读 base 不应看到幻影伤害）。
+                damage.base = 0;
+                damage.afterAdd = 0;
+                damage.afterMul = 0;
+                damage.final = 0;
+                damage.addPct = 0;
+                damage.mulCoef = 0.0;
             }
         );
     }

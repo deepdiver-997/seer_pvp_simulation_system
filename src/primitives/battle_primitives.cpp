@@ -97,7 +97,18 @@ static ApplyAnomalyResult apply_anomaly_impl(BattleContext* ctx,
     };
 
     // [3] 次免/回合类免疫（soul=false）—— 官方优先级：先于抗性判定挡下。
+    // 挡下后消费（顺序不可颠倒：先判定、后扣次数，否则 counts=1 的次免会在判定前
+    // 就被扣光注销，下一次判定查不到它 → 该挡下的没挡住）。
+    // ⚠️ 官方规则（docs/02-效果系统/官方机制理解与引擎缺口对照.md §二，idx=418 第2条）：
+    //    **存在回合类免控/弹控时，次免依旧正常消耗** —— 故"是窗口条目挡下的"也要扣
+    //    次数型条目（consume_immune 会跳过 counts==0 的窗口条目继续扫）。
     if (ctx->is_immune_effect(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id)) {
+        // 被弹回来的异常（reflect_depth>0）**不消耗**——"被弹回来的异常不属于精灵受到异常"
+        // （idx=375）；但它仍可**被**次免免疫（照常走本分支挡下，只是不扣次数）。
+        if (reflect_depth == 0) {
+            ctx->consume_immune(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id,
+                                /*soul_filter=*/0);
+        }
         return reflect();
     }
 
@@ -112,9 +123,13 @@ static ApplyAnomalyResult apply_anomaly_impl(BattleContext* ctx,
         return ApplyAnomalyResult::RESISTED_BY_RESISTANCE;
     }
 
-    // [5] 魂免（soul=true）—— 抗性判定失败后才查（官方优先级）。
+    // [5] 魂免（soul=true）—— 抗性判定失败后才查（官方优先级）。同样挡下后消费次数型。
     if (ctx->is_immune_soul(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id)
         || has_mark(pet.marks, 0)) {
+        if (reflect_depth == 0) {  // 弹回的异常不消耗（同 [3]）
+            ctx->consume_immune(target, ImmunityType::ANOMALY, ctx->currentState, anomaly_id,
+                                /*soul_filter=*/1);
+        }
         return reflect();
     }
 

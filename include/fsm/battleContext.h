@@ -447,6 +447,7 @@ public:
         rule_center_.clear_all();
         damage_pipeline_.clear();
         install_default_damage_reduction();
+        install_default_damage_block();
     }
 
     //--- 回合类效果管理 ---
@@ -512,12 +513,16 @@ public:
     int grant_immunity(int owner, ImmunityType type, uint64_t coverage,
                        uint64_t anomaly_mask = 0, int duration_rounds = 0, int source_id = 0,
                        bool soul_immunity = false,
-                       EffectScope scope = EffectScope::ON_STAGE) {
+                       EffectScope scope = EffectScope::ON_STAGE,
+                       int counts = 0, int source_effect_id = -1) {
         // 免疫单对象：source==target==被护方 owner。转发 RuleCenter（覆盖键含 subtype=type，
         // 免异常+免弱不同 type 各占一条）。
+        // counts>0 = 次数型（"免疫下N次某威胁"）：查询命中后由 consume_immune 扣一次，扣到 0 注销。
+        // source_effect_id：覆盖键的来源维度。默认 -1（匿名）→ 同类型免疫互相覆盖；
+        //   需要"窗口类免控 + 次数型次免"并存时，各传自己的 effect_id 才各占一条。
         return rule_center_.grant_immune(owner, static_cast<int>(type), coverage, anomaly_mask,
                                          duration_rounds, roundCount, source_id, soul_immunity,
-                                         scope, /*source_slot=*/-1);
+                                         scope, /*source_slot=*/-1, counts, source_effect_id);
     }
 
     void revoke_immunity(int owner, int source_id) {
@@ -544,6 +549,20 @@ public:
                                       roundCount, status_id, /*soul_filter=*/1);
     }
 
+    /**
+     * consume_immune - 查询并**消费**次数型免疫（"免下N次"）。
+     * 与 is_immune（纯查询）配对：先 is_immune 判定是否免疫，命中后调本方法扣一次。
+     * 命中窗口/永久免疫（counts==0）返回 false 不扣——那些不随施加消耗。
+     * @param status_id    ANOMALY 专用（0 = 不按 mask 过滤）
+     * @param soul_filter  -1=不限 / 0=仅次免(抗性前) / 1=仅魂免(抗性后)
+     */
+    bool consume_immune(int owner, ImmunityType type, State timing, int status_id = 0,
+                        int soul_filter = -1) {
+        return rule_center_.consume_immune(owner, static_cast<int>(type),
+                                           state_coverage_bit(timing), roundCount,
+                                           status_id, soul_filter);
+    }
+
     //--- 伤害管线便利方法 ---
 
     /**
@@ -563,6 +582,20 @@ public:
      * 每次攻击伤害结算前确保已安装（init_battle / clearAllEffects 后调用）。
      */
     void install_default_damage_reduction();
+
+    /**
+     * 安装默认挡伤（BLOCK 阶段，BLOCK 类别）。
+     * 把 RuleCenter 的"次数型免伤"（ImmunityType::DAMAGE，如"免疫下1次攻击伤害"）
+     * 接进伤害结算管线：命中 → 归零本次伤害 + consume_immune 扣一次。
+     *
+     * ⚠️ 为什么必须走管线而不是在 deal_damage/stage_simple_attack_damage 里 inline 判断：
+     *   免伤属于"挡伤"一族，须吃与其它挡伤同一道抑制门（damage_suppress_mask）——
+     *   被"挡伤失效"（蚀砚之泪≥4滴）压制时**既不触发也不扣次数**，次数保留到压制解除。
+     *   inline 判断在抑制门之外，会绕过它。BLOCK 阶段排在 DETECT 之前，故挡下后
+     *   DETECT 的"受高伤"触发（回血/弹伤/转化）因 final<=0 自然不成立。
+     * 每次攻击伤害结算前确保已安装（init_battle / clearAllEffects 后调用）。
+     */
+    void install_default_damage_block();
 
     /**
      * O(1) 查询目标是否还有回合类效果
