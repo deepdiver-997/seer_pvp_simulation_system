@@ -2,6 +2,7 @@
 #define BATTLE_WORKSPACE_H
 
 #include <cstring>
+#include <ostream>
 #include <effects/effect.h>
 #include <entities/numerical-properties.h>
 
@@ -30,6 +31,47 @@ struct DamageSnapshot {
     bool isWhiteNumber = false;
     bool isCrit = false;
 };
+
+/**
+ * SkillPowerView - 技能威力视图（带"变威力"触发标记）
+ *
+ * **写入即触发变威力重算**——官方对"威力"的定义就是这个规则本身：
+ *   「威力：当命中效果对技能威力值进行修改时，**会以当前状态重新进行伤害结算覆盖原本的伤害值**」
+ *   （reference L128《官方名词解释—1》）
+ * 关键是触发条件是"威力被**改过**"，而不是"威力变了"：**提升 0 点威力也算变威力**
+ * （L453《机制解析—变威力》：「提升0点威力也属于变威力」；L173 同旨"就算是0连击，他也是变威力效果"）。
+ * 所以不能做前后值比较，必须记录"有人写过"。
+ *
+ * 因此这里不用裸 int + "记得调 helper"：`view[owner] = x` / `view[owner] += x` **自动**置
+ * `rewritten`，插件侧零纪律成本（少写一行就是 CLAUDE.md §5.10 那种"改了没反应"的静默失败）。
+ * 引擎自己的两次写入走 `materialize()`（不打标记），见下。
+ *
+ * 消费路径：`handle_Battle{First,Second}AttackDamage` 在时点桶跑完、伤害管线开跑**之前**
+ * 检查 `rewritten` —— 命中就"推翻第一次、以当前状态（含已归零的双防 / 当前能力等级 /
+ * 当前克制系数）重算第二次"，第二次整体覆盖第一次。
+ *
+ * `value` 语义：**-1 = 未物化**（`calculateDamage` 回退 `skill.power`）；
+ * **0 是合法值**——强制执行打盔时故意置 0 来"只有效果、没有红伤"（用户 2026-09-13 口径）。
+ */
+struct SkillPowerView {
+    int value = -1;
+    bool rewritten = false;
+
+    // 效果侧写入（`ws.skill_power_view[owner] = x` / `+= x`）→ 自动打"变威力"标记
+    SkillPowerView& operator=(int v) { value = v; rewritten = true; return *this; }
+    SkillPowerView& operator+=(int v) { value += v; rewritten = true; return *this; }
+    // 读点零改动（`int v = ws.skill_power_view[i]` / `== n` / `<< view`）
+    operator int() const { return value; }
+
+    // 引擎物化打底（resolve_skill_execution 写 skill.power）：**不是**效果改写，不打标记
+    void materialize(int v) { value = v; }
+    // 收尾消费：重算之后清标记（每次技能执行在 resolve_skill_execution 末尾也会清一次，防泄漏）
+    void consume() { rewritten = false; }
+};
+
+inline std::ostream& operator<<(std::ostream& os, const SkillPowerView& v) {
+    return os << v.value;
+}
 
 /**
  * SkillReplaceSource - 技能替换来源（kExecOnly 载体：ws 描述符）
@@ -159,7 +201,9 @@ struct BattleWorkspace {
     // SKILL_EFFECT 时点修改它，ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值。
     // ⚠️ **-1 = 未物化**（calculateDamage 回退 skill.power）；**0 是合法值**——强制执行打盔时
     //    故意置 0 来"只有效果、没有红伤"（用户 2026-09-13 口径）。
-    int skill_power_view[2];
+    // ⚠️ 类型是带标记的 `SkillPowerView`：**效果写它 = 声明"这是变威力"** → ATTACK_DAMAGE
+    //    收尾据此重算第二次（详见结构体注释）。读点因 `operator int()` 无感。
+    SkillPowerView skill_power_view[2];
 
     //========== 技能替换：kExecOnly 载体（艾欧丽娅式，见 SkillReplaceSource 注释）==========
     // "执行什么技能"的唯一取用点是 battleFsm.cpp 的 resolve_executing_skill；
@@ -210,6 +254,10 @@ struct BattleWorkspace {
             skill_resolution_flags[i] = SkillResolutionFlags{false, false};
             skill_pp_cost_multiplier[i] = 1;
             restraint_view[i] = -1.0;  // 未设置 → 按元素计算
+            // 未物化哨兵：memset 会清成 0（= "视图威力 0"这个合法值），必须显式恢复 -1，
+            // 否则"没物化过就按 skill.power 算"的回退分支永远走不到。
+            skill_power_view[i].value = -1;
+            skill_power_view[i].rewritten = false;
             skill_effect_source[i] = SkillReplaceSource{};  // 未替换 → 用本槽位技能（memset 后须显式恢复默认）
         }
     }

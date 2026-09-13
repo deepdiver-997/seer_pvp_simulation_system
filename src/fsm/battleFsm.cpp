@@ -223,12 +223,18 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
     Skills& skill = *executing;
     // 技能威力视图层：本次攻击的威力打底物化到 ws，效果（SKILL_EFFECT 时点）可改，
     // ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值（见 battleWorkspace.h）。
-    ctx->ws.skill_power_view[robot_id] = skill.power;
+    // ⚠️ 用 `materialize()` 而**不是** `=`：物化是引擎打底，不算"效果改威力"，
+    //    不该触发变威力重算（`=` 会置 rewritten 标记）。
+    ctx->ws.skill_power_view[robot_id].materialize(skill.power);
     // 技能元素视图层：克制计算用的系别打底物化 skill.element，效果可改（"以XX系别算克制"）。
     ctx->ws.skill_element_view[robot_id][0] = skill.element[0];
     ctx->ws.skill_element_view[robot_id][1] = skill.element[1];
     const auto [result, flags] = skill.execute(ctx, robot_id, trigger_state);
     write_skill_resolution(ctx, robot_id, result, flags);
+    // 变威力标记清零：`execute()` 里的**强制执行置 0**（query_usage ②.0）是引擎行为不是效果改写，
+    // 连同上面的物化一起在这里清掉。此后 SKILL_EFFECT / ATTACK_DAMAGE 桶里的任何写入都算
+    // "效果改了威力" → ATTACK_DAMAGE 收尾重算第二次。每次技能执行清一次 → 不跨技能泄漏。
+    ctx->ws.skill_power_view[robot_id].consume();
     // 米修莉式转换"用后即耗"：本次技能（无论命中/miss/被盔封）已按替换技能结算完毕，
     // pending 到此消费（"对手**下次**技能转化为摸摸"——下次再触发需要重新施加印记）。
     // 只在"真的结算了一次技能"时消费：被控/切宠跳过主流程不经过这里，转换留给下次。
@@ -376,7 +382,10 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
     snapshot.isFixed = false;
     snapshot.isTrueDamage = false;
     snapshot.isWhiteNumber = false;
-    snapshot.isCrit = false;
+    // ⚠️ 这一行原来是 `= false`，把上面暴击分支刚设的 `isCrit = true` 当场抹掉——
+    //    `resolvedDamage.isCrit` 因此**永远是 false**，而 soul_lib 的反伤分支
+    //    （`if (!damage.isCrit) return;`）正等着它。改为照实回填（2026-09-14 修）。
+    snapshot.isCrit = ctx->crit_happened[attacker_id];
 
     ctx->pendingDamage = snapshot;
     ctx->resolvedDamage = snapshot;
@@ -404,6 +413,41 @@ void apply_crit_defense_break(BattleContext* ctx, int attacker_id) {
         return;
     }
     crit_defense_break(ctx, 1 - attacker_id, static_cast<int>(executing->type));
+}
+
+// 变威力：**推翻第一次伤害计算，重算第二次，第二次覆盖第一次**（用户 2026-09-14 拍板落地）。
+//
+// 触发条件 = "威力被**改过**"，不是"威力变了"——官方对"威力"的定义就是这个规则本身：
+//   「当命中效果对技能威力值进行修改时，会以当前状态重新进行伤害结算覆盖原本的伤害值」（L128）
+// 「提升0点威力也属于变威力」（L453）、「就算是0连击，他也是变威力效果」（L173）都印证
+// 触发看的是"有人写过视图"而非前后值差——所以判据是 `ws.skill_power_view[id].rewritten`，
+// 由 `SkillPowerView::operator=`/`operator+=` 自动置位（效果侧零纪律成本）。
+//
+// 时点：`execute_registered_actions(ATTACK_DAMAGE)` **之后**、`damage_pipeline_.run()` **之前**。
+//   · 破防（`apply_crit_defense_break`）已经发生 → 第二次天然读到归零后的双防
+//     ——这就是官方"**变威力暴击无视双防**"的唯一成因（非变威力技能本次伤害已算完，享受不到）；
+//   · 管线还没跑 → **管线仍然只跑一遍**，绕开"跑两遍就错"的那些效果
+//     （`install_default_damage_block` 的 `consume_immune` 会扣次数、effect_525 会重掷概率、
+//     effect_1236 会再打一次粉伤、`resolvedDamage.addPct` 会累加）。
+//
+// 为什么重算安全：`stage_simple_attack_damage` 开头清空两个快照、末尾用局部 snapshot 整体赋值
+//   → 天然"覆盖"而不是"叠加"（不会把减伤/增伤算两遍）。
+// 暴力重掷：暴击**不**重掷（`ctx->crit_happened` 一次技能只掷一次，重算照它再乘一次倍率，
+//   正是官方"第二次重算包含暴击"）；伤害浮动 `rand()` 重掷（第二次是一次完整结算，用户 2026-09-14 裁定）。
+//
+// 典型消费场景：
+//   · 无相谛 2260：强制执行打盔把视图置 0 → 技能自己的"威力+170"把它改回来 → 隔着盔打出红伤
+//     （L390：「由于变威力结算过于靠后，因此可以隔着盔打出攻击伤害」）；
+//   · 魂印"每次使用威力递增"：改的是 skill 本体，下次物化才进视图（那是另一条路，不触发重算）。
+void apply_variable_power_recalc(BattleContext* ctx, int attacker_id) {
+    if (!ctx || attacker_id < 0 || attacker_id > 1) {
+        return;
+    }
+    if (!ctx->ws.skill_power_view[attacker_id].rewritten) {
+        return;
+    }
+    stage_simple_attack_damage(ctx, attacker_id);   // 第二次：以当前状态重算，覆盖第一次
+    ctx->ws.skill_power_view[attacker_id].consume();
 }
 
 void apply_resolved_damage(BattleContext* ctx) {
@@ -1089,6 +1133,7 @@ void BattleFsm::handle_BattleFirstAttackDamage(BattleContext* battleContext) {
     //   变威力会"推翻第一次、按重置后的双防重算第二次"，重算必须在破防之后。
     apply_crit_defense_break(battleContext, first_mover_id);
     battleContext->execute_registered_actions(first_mover_id, State::BATTLE_FIRST_ATTACK_DAMAGE);
+    apply_variable_power_recalc(battleContext, first_mover_id);
     // 伤害修正管线：按 DamagePhase 顺序执行双方伤害效果，读写 resolvedDamage
     battleContext->damage_pipeline_.run(battleContext, first_mover_id, 1 - first_mover_id);
     // 白板（③层 kFullNull）：命中效果失效且伤害归 0（保留伤害 kEffectsOnly 不动）
@@ -1199,6 +1244,7 @@ void BattleFsm::handle_BattleSecondAttackDamage(BattleContext* battleContext) {
     // ★ 暴击破防：同第一行动方——第一次公式算完就重置双防（为变威力重算让路）。
     apply_crit_defense_break(battleContext, second_mover_id);
     battleContext->execute_registered_actions(second_mover_id, State::BATTLE_SECOND_ATTACK_DAMAGE);
+    apply_variable_power_recalc(battleContext, second_mover_id);
     // 伤害修正管线：按 DamagePhase 顺序执行双方伤害效果，读写 resolvedDamage
     battleContext->damage_pipeline_.run(battleContext, second_mover_id, 1 - second_mover_id);
     // 白板（③层 kFullNull）：命中效果失效且伤害归 0（保留伤害 kEffectsOnly 不动）
