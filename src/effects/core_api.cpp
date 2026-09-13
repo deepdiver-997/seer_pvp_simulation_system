@@ -2,7 +2,16 @@
 #include <plugin/core_api.h>
 
 #include <primitives/battle_primitives.h>
+#include <effects/effect_meta.h>
 #include <numerical-calculation/calculation.h>
+
+namespace {
+// 插件侧窗口家族查询：取不到 meta（未收录）→ 默认 InRounds。
+EffectWindowKind effect_window_kind_impl(int effect_id) {
+    const EffectMeta* meta = EffectMetaCatalog::instance().find(effect_id);
+    return meta ? meta->window : EffectWindowKind::InRounds;
+}
+}  // namespace
 
 const CoreApi& core_api() {
     static const CoreApi api = {
@@ -19,6 +28,7 @@ const CoreApi& core_api() {
         /*stat_reversal=*/&stat_reversal,
         /*stat_boost_reversal=*/&stat_boost_reversal,
         /*fixed_damage=*/&fixed_damage,
+        /*effect_window_kind=*/&effect_window_kind_impl,
         /*restraint_multiplier=*/&Calculation::calculateRestraintMultiples,
         /*deal_pink_damage=*/&deal_pink_damage,
     };

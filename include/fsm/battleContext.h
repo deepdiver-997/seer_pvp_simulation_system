@@ -363,6 +363,46 @@ public:
     // 这两个入口是插件注册效果的唯一途径——valid_id 绑定、同源去重、回合计数回滚
     // 都由 TimedBucket::register_effect 内部完成。
     // （此前插件是自己手抄这套逻辑：见 resources/moves_lib/lib_1.cpp effect_skill_843 的历史版本。）
+    //--- 回合数窗口（"N回合内" vs "下N回合"，官方通用规则，用户 2026-09-13 定）---
+    //
+    // 注册**持续 N 回合**的效果时，官方口径的生效起点不是"注册那一刻"，而是：
+    //   InRounds（"{N}回合内"，默认）：
+    //     先出手 → 本回合就结算一次 → 起点 = 本回合          → 生效 [R, R+N-1]
+    //     后出手 → 本回合已错过结算 → 顺延                       → 生效 [R+1, R+N]
+    //     ⚠️ N==1（"本回合内"）**不顺延**：它就覆盖本回合，挪到下一回合反而是错的。
+    //   NextRounds（"下{N}回合"，如"下2回合必定先手"）：
+    //     本回合本就不算 → 先/后出手**都**从下一回合起算           → 生效 [R+1, R+N]
+    //     （后出手**不再**额外顺延。）
+    // 家族声明来源 = 认证数据层（custom_effect_overrides, override_type='window'）→
+    // EffectMetaCatalog::find(id)->window；插件侧可经 CoreApi::effect_window_kind(effect_id) 查。
+    //
+    // 用法（core 注册路径与插件注册路径都要用，否则后出手会少结算一回合）：
+    //   ce = make_unique<ContinuousEffect>(effect, state, owner, duration,
+    //                                      ctx->round_effect_start_round(owner, duration, kind));
+    int round_effect_start_round(int owner, int duration_rounds,
+                                 EffectWindowKind window = EffectWindowKind::InRounds) const {
+        if (window == EffectWindowKind::NextRounds) {
+            return roundCount + 1;   // "下N回合"：先/后出手都从下回合起算
+        }
+        // "N回合内"：后出手顺延一回合（N>=2 才有"少结算一次"的问题；N==1 是本回合效果）
+        if (duration_rounds >= 2 && owner >= 0 && owner <= 1 && is_second_mover(owner)) {
+            return roundCount + 1;
+        }
+        return roundCount;
+    }
+
+    // 本回合该 owner 是否后出手（先手权由 MOVE_RIGHT 时点结算并写入 ws.preemptive_right）。
+    bool is_second_mover(int owner) const {
+        if (owner < 0 || owner > 1) {
+            return false;
+        }
+        switch (ws.preemptive_right) {
+            case PreemptiveRight::SEER_ROBOT_1: return owner == 1;
+            case PreemptiveRight::SEER_ROBOT_2: return owner == 0;
+            default: return false;  // NONE（未结算/双方都没出手）→ 按先出手处理
+        }
+    }
+
     void register_skill_effect(State trigger, int owner, std::unique_ptr<ContinuousEffect> effect) {
         if (owner < 0 || owner > 1) {
             return;

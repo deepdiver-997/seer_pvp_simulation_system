@@ -33,6 +33,18 @@ enum class EffectScope {
     TEAM,
 };
 
+// 回合数窗口家族（官方 effect 文本两类，语义不同 —— 用户 2026-09-13 定；引擎级通用规则）：
+//   InRounds   —— "{N}回合内"（DB 里约 495 条模板）。**先出手**：本回合就结算一次 → 生效 [R, R+N-1]；
+//                 **后出手**：本回合已"错过结算" → 顺延一回合 → 生效 [R+1, R+N]（N≥2 时才顺延；
+//                 N=1 的"本回合内"照旧只覆盖本回合，不挪到下一回合）。
+//   NextRounds —— "下{N}回合"（约 287 条，如"下2回合必定先手"）。语义上**本回合就不算** →
+//                 先/后出手**都**从下一回合起算：[R+1, R+N]（后出手**不再**额外顺延）。
+// 声明来源 = **认证数据层** custom_effect_overrides(override_type='window', map_value=...)，未声明默认 InRounds。
+enum class EffectWindowKind {
+    InRounds,
+    NextRounds,
+};
+
 class ContinuousEffect {
 public:
     explicit ContinuousEffect(int owner = -1) : owner_(owner) {}

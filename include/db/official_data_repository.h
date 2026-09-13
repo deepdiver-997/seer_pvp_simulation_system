@@ -156,6 +156,10 @@ public:
     std::optional<CustomProgramRecord> load_custom_program(int effect_id, int skill_id) const;
     std::optional<CustomOverrideRecord> load_custom_override(int effect_id) const;
 
+    // 认证数据层：全部 `override_type='window'` 声明（effect_id → "next_rounds"/"in_rounds"）。
+    // 供 EffectMetaCatalog 一次性加载（判"N回合内" vs "下N回合"的窗口家族，见 EffectWindowKind）。
+    std::vector<std::pair<int, std::string>> load_effect_window_overrides() const;
+
     std::optional<int> find_monster_id_by_exact_name(const std::string& monster_name) const;
     std::optional<MonsterRecord> load_monster(int monster_id) const;
     std::optional<MonsterRecord> load_monster_by_exact_name(const std::string& monster_name) const;

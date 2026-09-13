@@ -662,6 +662,17 @@ void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult resu
         const State pending_observe_state = state_for_owner(node.pendingObserveState, owner, ctx);
         // one-shot (left_round==0) 归一化为本回合有效的 1 回合效果，否则立即过期永不执行
         const int duration = duration_for_effect(effect.left_round);
+        // 回合数窗口：官方口径的**生效起点**（"N回合内"后出手顺延 / "下N回合"一律从下回合起算）。
+        // ⚠️ 只折算**真正的窗口效果**（left_round > 0，效果本身持续 N 回合）；
+        //    left_round==0 的"本回合一次性动作节点"（duration 归一化为 1）**不挪**——
+        //    否则"下N回合"技能的**执行节点**会被推到下一回合才跑（动作迟到一拍）。
+        //    插件自己 register 的多回合效果（如 843 的 MOVE_RIGHT 条目）由插件用同一个
+        //    `round_effect_start_round` 折算（家族经 CoreApi::effect_window_kind 查）。
+        const EffectMeta* win_meta = EffectMetaCatalog::instance().find(effect.id);
+        const EffectWindowKind window_kind = win_meta ? win_meta->window : EffectWindowKind::InRounds;
+        const int start_round = effect.left_round > 0
+            ? ctx->round_effect_start_round(owner, duration, window_kind)
+            : ctx->roundCount;
 
         if (node.usePendingTrigger) {
             ctx->registerPendingEffect(
@@ -672,7 +683,7 @@ void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult resu
                     owner,
                     pending_observe_state,
                     nullptr,
-                    [ctx, owner, registerState = register_state, effect, duration](BattleContext*) {
+                    [ctx, owner, registerState = register_state, effect, duration, start_round](BattleContext*) {
                         ctx->registerEffect(
                             registerState,
                             owner,
@@ -681,7 +692,7 @@ void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult resu
                                 registerState,
                                 owner,
                                 duration,
-                                ctx->roundCount
+                                start_round   // 窗口起点在**注册时**算好（pending 触发时再算会错拍）
                             )
                         );
                     },

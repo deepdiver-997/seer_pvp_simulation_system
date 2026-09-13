@@ -188,6 +188,14 @@ bool EffectMetaCatalog::build() {
         meta.source_note = override_entry.note;
     }
 
+    // 回合数窗口家族声明（认证数据层 custom_effect_overrides, override_type='window'）：
+    // "next_rounds" = "下N回合"（本回合不算）；其余/未声明 = "in_rounds"（"N回合内"）。
+    for (const auto& [effect_id, kind] : store.repository().load_effect_window_overrides()) {
+        metas_[effect_id].window = (kind == "next_rounds")
+            ? EffectWindowKind::NextRounds
+            : EffectWindowKind::InRounds;
+    }
+
     // 可否决性覆盖（③层命中效果失效时逐效果标签）
     for (const NullifyOverride& override_entry : kNullifyOverrides) {
         metas_[override_entry.effect_id].nullify.hit_effect_invalidatable =

@@ -53,6 +53,9 @@ struct CoreApi {
     StatReversalResult (*stat_boost_reversal)(BattleContext*, int target);
     // 固定伤害（吃护罩/固定抗性/事件，复用 deal_damage）。返回"发生了什么"。
     FixedDamageResult (*fixed_damage)(BattleContext*, int target, int amount);
+    // 回合数窗口家族（认证数据层声明）："next_rounds"（下N回合，本回合不算）/ 默认 InRounds（N回合内）。
+    // 插件注册**持续 N 回合**的效果时应据此算起点：ctx->round_effect_start_round(owner, duration, kind)。
+    EffectWindowKind (*effect_window_kind)(int effect_id);
     // 克制倍数查询：`attacker_elem` 克制 `defender_elem` 的倍率（官方原表 {0免疫,0.5减半,1普通,2克制}，
     // 双属性按官方组合相乘）。表是**运行时从 DB 加载**的全局数据（elemental-attributes.cpp），
     // 插件不链接 sim_core、拿不到该符号 → 经本槽查询；core 侧直接指向 Calculation::calculateRestraintMultiples。

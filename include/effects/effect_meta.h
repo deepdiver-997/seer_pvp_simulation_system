@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <effects/continuousEffect.h>  // EffectWindowKind
 #include <effects/effect.h>
 
 // 效果语义元数据。
@@ -68,6 +69,9 @@ struct EffectMeta {
     EffectChance chance;
     EffectClass cls = EffectClass::Undefined;
     NullifyPolicy nullify;
+    // 回合数窗口家族（"N回合内" vs "下N回合"）——来自认证数据层
+    // custom_effect_overrides(override_type='window')，未声明默认 InRounds。
+    EffectWindowKind window = EffectWindowKind::InRounds;
     std::string source_note;  // 分类依据（规则名/override），调试用
 };
 

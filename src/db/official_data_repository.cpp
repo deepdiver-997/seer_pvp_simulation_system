@@ -324,6 +324,26 @@ std::optional<CustomOverrideRecord> OfficialDataRepository::load_custom_override
     return r;
 }
 
+std::vector<std::pair<int, std::string>> OfficialDataRepository::load_effect_window_overrides() const {
+    std::vector<std::pair<int, std::string>> out;
+    if (!db_) {
+        return out;
+    }
+    Statement stmt(
+        db_,
+        "SELECT effect_id, map_value FROM custom_effect_overrides "
+        "WHERE override_type = 'window' AND map_value IS NOT NULL"
+    );
+    if (!stmt) {
+        last_error_ = sqlite3_errmsg(db_);
+        return out;
+    }
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        out.emplace_back(sqlite3_column_int(stmt.get(), 0), column_text(stmt.get(), 1));
+    }
+    return out;
+}
+
 std::optional<int> OfficialDataRepository::find_monster_id_by_exact_name(const std::string& monster_name) const {
     if (!db_) {
         last_error_ = "database is not open";
