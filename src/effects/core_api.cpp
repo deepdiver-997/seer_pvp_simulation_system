@@ -18,6 +18,7 @@ const CoreApi& core_api() {
         /*stat_reversal=*/&stat_reversal,
         /*stat_boost_reversal=*/&stat_boost_reversal,
         /*fixed_damage=*/&fixed_damage,
+        /*deal_pink_damage=*/&deal_pink_damage,
     };
     return api;
 }

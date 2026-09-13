@@ -247,13 +247,16 @@ void deal_damage(BattleContext* ctx, int target, int amount,
         }
         pre_resist = effective;
     }
+    // PERCENT_VALUE：amount 已是具体伤害值（如"自身已损失体力50%"），不再换算——
+    // 但**分档**仍属百分比伤害（走百分比抗性/护罩），见下方 kind 判定。
 
     // 粉伤抗性层（固定/百分比伤害）：免疫粉伤 → 对应来源抗性% → 减粉% 逐级削减。
     // 伤害抗性按来源分型：FIXED 走固定抗性、PERCENT 走百分比抗性（官方：暴击/固定/百分比）。
     // ⚠️ 读的是 ws **有效视图**而非 pet 本体——临时 buff 可修改抗性（混元天尊死亡 buff
     //    把己方精灵抗性视为 100%）。视图基线由 sync_damage_resist_view 在回合开始/换宠重基。
     // 被挡下（<=0）且粉转真 → 改以真实伤害结算（直通护盾/护罩、穿抗性/免疫）。TRUE 绕过此层。
-    if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
+    if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT
+        || kind == DamageKind::PERCENT_VALUE) {
         const int resist_pct =
             kind == DamageKind::FIXED ? ctx->ws.eff_fixed_resist_pct[target]
                                       : ctx->ws.eff_percent_resist_pct[target];
@@ -279,7 +282,8 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     if (!ignore_bank) {
         if (kind == DamageKind::NORMAL) {
             remaining = pet.shield_bank_.absorb(effective, &broken);
-        } else if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT) {
+        } else if (kind == DamageKind::FIXED || kind == DamageKind::PERCENT
+                   || kind == DamageKind::PERCENT_VALUE) {
             remaining = pet.hood_bank_.absorb(effective, &broken);
         }
         // DamageKind::TRUE：护盾/护罩均不响应，直通
@@ -299,8 +303,26 @@ void deal_damage(BattleContext* ctx, int target, int amount,
     }
     const int actual_damage = hp_before - pet.hp;
 
-    // 受到伤害事件（第三方"受到攻击伤害后/受高伤/受低伤"监听），amount = 实际扣血
-    ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target, actual_damage});
+    // 受到伤害事件（第三方"受到攻击伤害后/受高伤/受低伤"监听），amount = 实际扣血。
+    // 带上 emit 当时的 FSM 时点：watcher 在 drain 时才跑，那时 currentState 已经推进，
+    // 靠 ctx->currentState 判不出"是攻击伤害还是粉伤"（见 BattleEvent::state）。
+    ctx->event_center_.emit(BattleEvent{EventType::EVENT_TAKE_DAMAGE, actor, target,
+                                        actual_damage, static_cast<int>(ctx->currentState)});
+}
+
+// 粉伤入口（插件可调）：走 deal_damage，返回"发生了什么"。
+FixedDamageResult deal_pink_damage(BattleContext* ctx, int target, int amount,
+                                   DamageKind kind, int actor) {
+    if (!ctx || target < 0 || target > 1 || amount <= 0) {
+        return FixedDamageResult::INVALID_PARAM;
+    }
+    if (kind != DamageKind::FIXED && kind != DamageKind::PERCENT
+        && kind != DamageKind::PERCENT_VALUE) {
+        return FixedDamageResult::INVALID_PARAM;  // 只做粉伤；红伤/真伤另有入口
+    }
+    deal_damage(ctx, target, amount, kind, actor);
+    return ctx->getPet(target).hp <= 0 ? FixedDamageResult::TARGET_DEFEATED
+                                       : FixedDamageResult::SUCCESS;
 }
 
 void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute,

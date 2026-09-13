@@ -51,8 +51,12 @@ struct CoreApi {
     // 反转目标的**能力提升**（正→等负，"反转对手能力提升"）。弱化类动作 →
     // 先查免弱 STAT_DROP（免疫返回 BLOCKED）。与上面那个方向相反、免疫面不同。
     StatReversalResult (*stat_boost_reversal)(BattleContext*, int target);
-    // 固定伤害（吃护盾/事件，复用 deal_damage）。返回"发生了什么"。
+    // 固定伤害（吃护罩/固定抗性/事件，复用 deal_damage）。返回"发生了什么"。
     FixedDamageResult (*fixed_damage)(BattleContext*, int target, int amount);
+    // 粉伤·指定数值（FIXED 固定档 / PERCENT·PERCENT_VALUE 百分比档）。
+    // 插件造粉伤的唯一入口（插件不能直调 deal_damage）；PERCENT_VALUE 的 amount 是具体值。
+    FixedDamageResult (*deal_pink_damage)(BattleContext*, int target, int amount,
+                                          DamageKind kind, int actor);
 };
 
 // sim_core 暴露的 CoreApi 单例（实际填充）。插件侧不调它；由 core 在初始化时传入。

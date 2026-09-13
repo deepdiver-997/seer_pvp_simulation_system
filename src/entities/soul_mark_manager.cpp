@@ -392,7 +392,8 @@ void SoulMark::register_soul_effect(BattleContext* context, int owner, bool owne
         return;
     }
     if (has_program_) {
-        for (const auto& node : program_) {
+        for (std::size_t node_idx = 0; node_idx < program_.size(); ++node_idx) {
+            const SoulMarkNodeRef& node = program_[node_idx];
             if (!node.effect_fn) {
                 continue;
             }
@@ -400,7 +401,13 @@ void SoulMark::register_soul_effect(BattleContext* context, int owner, bool owne
             if (!is_roster && !owner_on_stage) {
                 continue;  // STAGE 节点：宿主不在场则不注册
             }
-            Effect wrapper(id, 0, owner, /*left_round=*/-1,
+            // ⚠️ effect_id 必须**逐节点不同**：桶 key = (source_id << 32) | effect_id，
+            //    同魂印的节点若共用 id，则**同一 State 上的两个节点互相覆盖**（后注册顶掉
+            //    先注册 → 前者永不执行）。旧规避是"节点放不同 State"（CLAUDE.md §5.3），
+            //    这里改成 id*100+节点序号：同 State 多节点各占一条，且每回合更新器重注册
+            //    仍命中同一 key（幂等刷新，不追加）。mark id 在日志里仍可读（如 103800/103801）。
+            const int node_effect_id = id * 100 + static_cast<int>(node_idx);
+            Effect wrapper(node_effect_id, 0, owner, /*left_round=*/-1,
                            bind_soulmark_args(args, owner), node.effect_fn);
             auto ce = std::make_unique<ContinuousEffect>(
                 wrapper, node.trigger_state, owner, /*duration=*/-1, context->roundCount

@@ -89,10 +89,13 @@ BreakResult break_round_effects(BattleContext* ctx, int target);
 // 伤害
 // ----------------------------------------------------------------
 enum class DamageKind {
-    NORMAL,   // 普通攻击伤害（吃护盾）
-    FIXED,    // 固定伤害（吃护盾）
-    PERCENT,  // 百分比伤害（占目标最大体力百分比，吃护盾）
-    TRUE,     // 真实伤害（吃护盾）
+    NORMAL,        // 普通攻击伤害（红伤；吃护盾）
+    FIXED,         // 固定伤害（粉伤·固定档；吃护罩/固定抗性）
+    PERCENT,       // 百分比伤害（粉伤·百分比档；amount 是"占目标最大体力的百分比"）
+    PERCENT_VALUE, // 百分比伤害·指定数值（粉伤·百分比档；amount **已是具体伤害值**，
+                   //   不再按目标最大体力换算）——"附加自身已损失体力50%的百分比伤害"
+                   //   （谱尼能量刻印）这类"值由来源算出、但走百分比抗性/护罩"的效果用。
+    TRUE,          // 真实伤害（护盾护罩都不响应）
 };
 
 /**
@@ -294,6 +297,16 @@ void grant_guaranteed_first(BattleContext* ctx, int owner, int tier);
  * fixed_damage - 固定伤害（复用 deal_damage，吃护盾/事件）。
  */
 FixedDamageResult fixed_damage(BattleContext* ctx, int target, int amount);
+
+/**
+ * deal_pink_damage - 造成**指定数值**的粉伤（固定/百分比分型）。
+ * 插件侧（moves_lib/soul_lib）造粉伤的唯一入口——插件不链接 sim_core，调不到 deal_damage。
+ * kind 决定走哪一档抗性/护罩：FIXED=固定档、PERCENT/PERCENT_VALUE=百分比档；
+ * 与 deal_damage 的关系：PERCENT_VALUE 是本函数新增的档（amount 为具体值，不按最大体力换算）。
+ * 仍吃免粉/抗性/护罩，并 emit EVENT_TAKE_DAMAGE。
+ */
+FixedDamageResult deal_pink_damage(BattleContext* ctx, int target, int amount,
+                                   DamageKind kind, int actor = -1);
 
 // ----------------------------------------------------------------
 // 第二刀新原语（组合语法：无相谛 5 类条件模板）

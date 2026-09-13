@@ -43,6 +43,13 @@ struct BattleEvent {
     int actor = -1;
     int target = -1;
     int amount = 0;
+    // **emit 当时**的 FSM 时点（(int)State；kNoEventState = 未记录）。
+    // ⚠️ 为什么要存：事件是"入队 + 晚 drain"的——handler 跑完（其间 generateState 已把
+    //    currentState 推到下一状态）才派发给 watcher。回调里读 ctx->currentState 拿到的是
+    //    **下一个**状态，判不出"这次伤害是在哪个时点造成的"（如"受到攻击伤害后"要区分
+    //    攻击伤害时点 vs 粉伤时点）。emit 点当场把时点记进事件，回调读 ev.state 即可。
+    int state = kNoEventState;
+    static constexpr int kNoEventState = -999;
 };
 
 /**
