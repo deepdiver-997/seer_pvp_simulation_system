@@ -466,6 +466,28 @@ int transfer_stat_boosts(BattleContext* ctx, int from, int to) {
     return moved;
 }
 
+// 弱化原语：把目标的能力等级往下压。规则见头文件（先查免弱、可穿强化保护、钳 -6）。
+StatDropResult stat_drop(BattleContext* ctx, int target, int stat, int amount) {
+    if (!ctx || target < 0 || target > 1 || stat < 0 || stat >= 6 || amount <= 0) {
+        return StatDropResult::INVALID_PARAM;
+    }
+    // ① 免弱：**无条件、最先查**。目标身上还有强化也照样失败——不许拿"有 +N 可抵消"当理由降。
+    if (ctx->is_immune(target, ImmunityType::STAT_DROP, ctx->currentState)) {
+        return StatDropResult::IMMUNE;
+    }
+    // ⚠️ 此处**不查** STAT_CLEAR（免消除强化）：那个护的是"已有的提升被消除/吸取"，
+    //    弱化是往下压，原理不同，可以穿过强化保护（用户 2026-09-13 定）。
+    ElfPet& pet = ctx->getPet(target);
+    int& level = pet.levels[stat];
+    if (level <= -6) {
+        return StatDropResult::AT_FLOOR;  // 已到底，不越界
+    }
+    const int new_level = std::max(level - amount, -6);  // ② 不突破 -6（钳制）
+    level = new_level;
+    ctx->ws.view_levels[target][stat] = new_level;  // 视图同步（伤害/先手权读它）
+    return StatDropResult::SUCCESS;
+}
+
 // 反转目标的能力下降：负等级 → 正等级（下降翻成提升），不动已有提升。
 // 与 clear_stat_boosts（消除提升）独立——"反转"不等于"消除"。
 StatReversalResult stat_reversal(BattleContext* ctx, int target) {

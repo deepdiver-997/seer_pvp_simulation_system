@@ -36,7 +36,11 @@ struct CoreApi {
     // 授予"下一回合必先"（分等级：tier 越高越先；可被断回合移除）。
     void (*grant_guaranteed_first)(BattleContext*, int owner, int tier);
     // 能力等级变更（真实 pet.levels，持久；视层留 ws）。返回 SUCCESS/AT_CAP/INVALID_PARAM。
+    // **不查免弱**——自身增益/原始变更用它；"对手施加的弱化"用 stat_drop。
     StatChangeResult (*stat_change)(BattleContext*, int target, int stat, int delta);
+    // 弱化原语（"令对手攻击-2"）：先查免弱 STAT_DROP（无条件，有提升也照样失败）、
+    // 可穿强化保护 STAT_CLEAR、钳 -6。返回 SUCCESS/AT_FLOOR/IMMUNE/INVALID_PARAM。
+    StatDropResult (*stat_drop)(BattleContext*, int target, int stat, int amount);
     // 挂"技能拦截"（盔/威/封属，含 hit_invalid 命中失效语义）。属性/攻击/次数/回合/scope 全部可配。
     // source=挂载(施放)方、target=生效(被封)方（统一语义）。
     void (*seal_skill)(BattleContext*, int source, int target, int effect_id, bool attribute,

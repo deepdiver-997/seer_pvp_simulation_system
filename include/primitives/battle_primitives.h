@@ -169,6 +169,14 @@ enum class StatChangeResult {
     INVALID_PARAM, // 无效参数（target/stat 非法）
 };
 
+// 弱化原语的返回（见 stat_drop）。
+enum class StatDropResult {
+    SUCCESS,       // 成功弱化（含"部分生效"：压到 -6 为止）
+    AT_FLOOR,      // 已在 -6，无法再降（等级不变）
+    IMMUNE,        // 目标免疫弱化（STAT_DROP）→ 整次失败，等级不变
+    INVALID_PARAM, // 无效参数（target/stat 非法 / amount<=0）
+};
+
 /**
  * stat_change - 真实能力等级变更（pet.levels，持久；视层留 ws）。
  * 返回"发生了什么"，效果程序据此分支（如"提升失败则附加固定伤害"）。
@@ -178,6 +186,24 @@ enum class StatChangeResult {
  * @param delta  变化量（正=提升，负=下降；越界则 AT_CAP 不变更）
  */
 StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta);
+
+/**
+ * stat_drop - **弱化原语**：降低目标的某项能力等级（"令对手攻击-2"之类）。
+ *
+ * 与 stat_change 的分工：
+ *   - stat_change = 原始等级变更（自身增益 / 弱化之外的场景），**不查免弱**；
+ *   - stat_drop   = "对手施加的弱化"，**第一件事就是查 `ImmunityType::STAT_DROP`（免弱）**。
+ *
+ * 规则（用户 2026-09-13 定）：
+ *   1. **先查免弱、无条件**：目标有免弱 → 直接 IMMUNE 失败、等级一点不动。
+ *      "即使对手身上还有强化也不能降低"——不许把"目标有 +N 提升"当作可以抵消弱化的理由。
+ *   2. **弱化可以突破"强化保护"**：`STAT_CLEAR`（能力提升无法被消除或吸取）**不查**——
+ *      原理不同：那个护的是"已有的提升被拿走"，这个是把等级往下压。
+ *   3. **不突破 -6**：到 -6 即停（钳制），不越界（区别于 stat_change 的 AT_CAP 拒绝）。
+ *
+ * @param amount 下降量（正数；<=0 → INVALID_PARAM）
+ */
+StatDropResult stat_drop(BattleContext* ctx, int target, int stat, int amount);
 
 // ----------------------------------------------------------------
 // 恢复体力 / 固定伤害
