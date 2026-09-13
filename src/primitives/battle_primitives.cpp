@@ -414,15 +414,56 @@ int clear_stat_boosts(BattleContext* ctx, int target) {
     if (!ctx || target < 0 || target > 1) {
         return 0;
     }
+    // 免消除强化（能力提升无法被消除或吸取，如希拓神煌炎舞斩 1960）：整次消除失败。
+    // 放在最前面——否则"消强成功→后续分支（必先/固伤）"会被误触发。
+    if (ctx->is_immune(target, ImmunityType::STAT_CLEAR, ctx->currentState)) {
+        return 0;
+    }
     ElfPet& pet = ctx->getPet(target);
     int cleared = 0;
-    for (auto& lv : pet.levels) {  // 只清提升（正等级），不动弱化/负等级
-        if (lv > 0) {
-            lv = 0;
+    for (int i = 0; i < static_cast<int>(pet.levels.size()); ++i) {
+        if (pet.levels[i] > 0) {  // 只清提升（正等级），不动弱化/负等级
+            pet.levels[i] = 0;
+            // 本体/视图同步：视图是伤害公式的读取源，不同步会让本次消强在伤害上"没发生"
+            // （反例：INT_MAX 那次本体/视图分裂）。
+            ctx->ws.view_levels[target][i] = 0;
             ++cleared;
         }
     }
     return cleared;  // 0 = 目标本无提升（消强未成功）
+}
+
+// 转换/吸取能力提升：把 from 的**正等级**整体搬到 to 身上（from 清零，to 等量累加）。
+// 官方 effect 85"使对手的能力提升效果转化到自己身上"；effect 1287"吸取对手能力提升"同一动作，
+// 区别只在吸取成功后额外给的东西（1287 另有"下N次受击减伤"）→ 共用本原语。
+// 返回搬走的属性项数（0 = 无可转化 或 被免消除强化挡下，两者调用方按同一分支处理）。
+// ⚠️ 免消除强化查**from**（要失去提升的那一方）；被挡时 to 也拿不到——"无法被消除或吸取"。
+int transfer_stat_boosts(BattleContext* ctx, int from, int to) {
+    if (!ctx || from < 0 || from > 1 || to < 0 || to > 1 || from == to) {
+        return 0;
+    }
+    if (ctx->is_immune(from, ImmunityType::STAT_CLEAR, ctx->currentState)) {
+        return 0;
+    }
+    ElfPet& src = ctx->getPet(from);
+    ElfPet& dst = ctx->getPet(to);
+    int moved = 0;
+    for (int i = 0; i < static_cast<int>(src.levels.size()); ++i) {
+        const int lv = src.levels[i];
+        if (lv <= 0) {
+            continue;  // 只转化提升，不动弱化
+        }
+        src.levels[i] = 0;
+        ctx->ws.view_levels[from][i] = 0;
+        int gained = dst.levels[i] + lv;
+        if (gained > 6) {
+            gained = 6;   // 能力等级上限 +6（与 stat_change 一致）
+        }
+        dst.levels[i] = gained;
+        ctx->ws.view_levels[to][i] = gained;
+        ++moved;
+    }
+    return moved;
 }
 
 // 反转目标的能力下降：负等级 → 正等级（下降翻成提升），不动已有提升。

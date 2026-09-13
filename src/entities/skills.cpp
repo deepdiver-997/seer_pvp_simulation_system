@@ -50,6 +50,9 @@ State effect_register_state(int effect_id) {
         case 1221:  // 王·酷烈风息 "反转自身能力下降"：攻击技能**先结算伤害再反转**——
                     // 反转不参与本次伤害（本次用反转前等级，提升留给下次），故伤害结算后操作 levels
             return State::BATTLE_FIRST_AFTER_ACTION;
+        case 1960:  // 希拓·神煌炎舞斩 "击败对手则令自身N回合内强化无法被消除或吸取"
+                    // → 击败对手后时点（本轮线性序最后，本技能效果仍在桶里）
+            return State::BATTLE_AFTER_DEFEATING_OPPONENT;
         default:
             return State::BATTLE_FIRST_SKILL_EFFECT;
     }

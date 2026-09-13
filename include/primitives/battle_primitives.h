@@ -210,8 +210,19 @@ HealResult heal_amount(BattleContext* ctx, int target, int amount);
  * 只清提升（等级 > 0 → 0），不动弱化/负等级。
  * 返回清掉的提升个数（0 = 目标本无提升 = "消强未成功"，调用方可据此决定后续分支，如"消强成功→必先"）。
  * ⚠️ 与 stat_reversal（反转下降→提升）**语义不同**，不能混用：这是"消除"，那个是"翻转"。
+ * 查 `ImmunityType::STAT_CLEAR`（免消除强化）——命中则整次消除失败、返回 0。
  */
 int clear_stat_boosts(BattleContext* ctx, int target);
+
+/**
+ * transfer_stat_boosts - 转换/吸取能力提升：from 的**正等级**整体搬到 to（from 清零、to 等量累加）。
+ * 官方 effect 85"使对手的能力提升效果转化到自己身上" / effect 1287"吸取对手能力提升"是同一动作，
+ * 区别只在吸取成功后额外给的东西 → 共用本原语。
+ * 返回搬走的属性项数（0 = 无可转化 或 被免消除强化挡下）。
+ * 查 `ImmunityType::STAT_CLEAR`（**查 from**：要失去提升的那一方；被挡则 to 也拿不到）。
+ * 本体/视图一并同步（ws.view_levels 是伤害公式的读取源）。
+ */
+int transfer_stat_boosts(BattleContext* ctx, int from, int to);
 
 /**
  * stat_reversal - 反转目标自身的**能力下降**（负等级 → 正等级），不动已存在的提升。
