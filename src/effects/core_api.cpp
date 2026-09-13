@@ -2,6 +2,7 @@
 #include <plugin/core_api.h>
 
 #include <primitives/battle_primitives.h>
+#include <numerical-calculation/calculation.h>
 
 const CoreApi& core_api() {
     static const CoreApi api = {
@@ -18,6 +19,7 @@ const CoreApi& core_api() {
         /*stat_reversal=*/&stat_reversal,
         /*stat_boost_reversal=*/&stat_boost_reversal,
         /*fixed_damage=*/&fixed_damage,
+        /*restraint_multiplier=*/&Calculation::calculateRestraintMultiples,
         /*deal_pink_damage=*/&deal_pink_damage,
     };
     return api;

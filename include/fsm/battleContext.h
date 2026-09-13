@@ -440,7 +440,8 @@ public:
         elf_element_view_bound_slot[0] = elf_element_view_bound_slot[1] = -1;
         for (int p = 0; p < 2; ++p) {
             for (ElfPet& pet : seerRobot[p].elfPets) {
-                pet.soulmark_storage.clear();  // 魂印持久槽：战斗结束/清场清空
+                pet.soulmark_storage.clear();   // 下场保留槽：战斗结束/清场清空
+                pet.on_stage_storage.clear();   // 本次上场槽：同上（换宠另有 perform_switch 单独清）
             }
         }
         event_center_.clear_all();

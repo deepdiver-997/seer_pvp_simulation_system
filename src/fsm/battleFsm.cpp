@@ -285,6 +285,9 @@ void perform_switch(BattleContext* ctx, int robot_id, int target_slot) {
     }
     // ② 清旧宠异常状态
     ctx->clear_on_stage_abnormal_statuses(robot_id);
+    // ②' 清旧宠"本次上场"私有槽（on_stage_storage）：下场即失效——"每次使用递增"这类
+    //     计数官方实测下场不保留（用户 2026-09-13）。soulmark_storage（下场保留）不动。
+    old_pet.on_stage_storage.clear();
     // ③ 更新在场槽位
     ctx->on_stage[robot_id] = target_slot;
     // ③' 新精灵登场：死亡通知标记复位（同一方后续新死亡要重新通知亡语类 watcher）

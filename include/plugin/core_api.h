@@ -53,6 +53,12 @@ struct CoreApi {
     StatReversalResult (*stat_boost_reversal)(BattleContext*, int target);
     // 固定伤害（吃护罩/固定抗性/事件，复用 deal_damage）。返回"发生了什么"。
     FixedDamageResult (*fixed_damage)(BattleContext*, int target, int amount);
+    // 克制倍数查询：`attacker_elem` 克制 `defender_elem` 的倍率（官方原表 {0免疫,0.5减半,1普通,2克制}，
+    // 双属性按官方组合相乘）。表是**运行时从 DB 加载**的全局数据（elemental-attributes.cpp），
+    // 插件不链接 sim_core、拿不到该符号 → 经本槽查询；core 侧直接指向 Calculation::calculateRestraintMultiples。
+    // 用途：**天敌**判定（对手固有属性克制自身固有属性 > 1，官方实测不看技能属性/不看视图）、
+    //       "本系/克制"类插件效果。⚠️ 传的是**元素 id 数组**（pet.elementalAttributes / skill.element）。
+    double (*restraint_multiplier)(const int attacker_elem[2], const int defender_elem[2]);
     // 粉伤·指定数值（FIXED 固定档 / PERCENT·PERCENT_VALUE 百分比档）。
     // 插件造粉伤的唯一入口（插件不能直调 deal_damage）；PERCENT_VALUE 的 amount 是具体值。
     FixedDamageResult (*deal_pink_damage)(BattleContext*, int target, int amount,
