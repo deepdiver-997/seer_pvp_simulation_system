@@ -31,6 +31,36 @@ constexpr MetaOverride kMetaOverrides[] = {
     // 697/699 穿透凭证（"无视伤害限制效果"/"无视攻击免疫效果"）——规则可命中，显式列出作文档
     {697, EffectCategory::Penetration, -1, -1, "override: 无视伤害限制（穿透）"},
     {699, EffectCategory::Penetration, -1, -1, "override: 无视攻击免疫（穿透）"},
+
+    // ── 连击（"1回合做 x~y 次攻击"一族，共 20 条模板 / 158 个技能引用）──────────────
+    // 自动分类对这批全是错的：1141 被 `{n}%令对手{` 规则判成 StatusInflict，
+    // 1930（"每有{0}级先制则连击次数+{1}"）被关键词判成 Priority，其余落 Other。
+    // 官方把"n次连击"与"威力提升n%/n点"**并列为变威力效果**（reference L453）。
+    // 纯元数据标注（EffectCategory 目前只有 Penetration 被 loadSkills 消费），
+    // 目的是让"哪些效果是连击"可查询、可审计。
+    // ★ 已实现：静态 x~y 区间（参数下标见 skills.cpp `combo_arg_indices`）
+    {1141, EffectCategory::Combo, -1, -1, "override: 连击 1回合做{0}~{1}次攻击（已实现）"},
+    {1172, EffectCategory::Combo, -1, -1, "override: 连击 {0}回合做{1}~{2}次攻击（已实现）"},
+    {1454, EffectCategory::Combo, -1, -1, "override: 连击 1回合做{0}-{1}次攻击（已实现）"},
+    {1455, EffectCategory::Combo, -1, -1, "override: 连击 1回合做{0}-{1}次攻击（已实现）"},
+    {1500, EffectCategory::Combo, -1, -1, "override: 连击+护盾上限修正（次数已实现，上限修正未做）"},
+    {1546, EffectCategory::Combo, -1, -1, "override: 连击+蓄力上限修正（次数已实现，上限修正未做）"},
+    {1577, EffectCategory::Combo, -1, -1, "override: 连击+PP上限修正（次数已实现，上限修正未做）"},
+    {1593, EffectCategory::Combo, -1, -1, "override: 连击+体力上限修正（次数已实现，上限修正未做）"},
+    {1627, EffectCategory::Combo, -1, -1, "override: 连击+达上限秒杀（次数已实现，秒杀子句未做）"},
+    {1666, EffectCategory::Combo, -1, -1, "override: 连击+领域上限修正（次数已实现，上限修正未做）"},
+    {1685, EffectCategory::Combo, -1, -1, "override: 连击+异常上限修正（次数已实现，上限修正未做）"},
+    {1732, EffectCategory::Combo, -1, -1, "override: 连击 1回合做{0}-{1}次攻击（已实现）"},
+    // ☆ 未实现：动态加数（基数固定、靠计数器加）
+    {484, EffectCategory::Combo, -1, -1, "override: 动态连击 连击{0}次/每次命中+{1}/上限{2}（未实现）"},
+    {1108, EffectCategory::Combo, -1, -1, "override: 动态连击 每提升状态+{0}/每弱化+{1}（未实现）"},
+    {1795, EffectCategory::Combo, -1, -1, "override: 动态连击 每层堕恶神祇+{1}（未实现）"},
+    {1863, EffectCategory::Combo, -1, -1, "override: 动态连击 每项PP不满+{1}（未实现）"},
+    {1930, EffectCategory::Combo, -1, -1, "override: 动态连击 每{0}级先制+{1}/上限{2}（未实现）"},
+    // ☆ 未实现：无参数常量（区间 5-10 写死在文案里，参数表为空）
+    {1608, EffectCategory::Combo, -1, -1, "override: 连击 5-10次（args_num=0，未实现）"},
+    {1609, EffectCategory::Combo, -1, -1, "override: 连击 5-10次（args_num=0，未实现）"},
+    {1610, EffectCategory::Combo, -1, -1, "override: 连击 5-10次（args_num=0，未实现）"},
 };
 
 // 可否决性覆盖表：③层命中效果失效时是否跳过该效果。

@@ -30,36 +30,43 @@ struct DamageSnapshot {
     bool isTrueDamage = false;
     bool isWhiteNumber = false;
     bool isCrit = false;
+    // 本次攻击的连击次数（"1回合做 x~y 次攻击"的 N；非连击技能为 1）。
+    // `×N` 已经乘进 base/final，这里只作日志与调试用（不参与任何运算）。
+    // ⚠️ `DamageSnapshot{}` 走默认成员初始化 → 1；但 `ws.reset()` 是 memset → 会被清成 0，
+    //    所以 `stage_simple_attack_damage` 里**显式**赋值，不要依赖默认值。
+    int hitCount = 1;
 };
 
 /**
- * SkillPowerView - 技能威力视图（带"变威力"触发标记）
+ * SkillView - 技能视图槽（带"变威力"触发标记）。**威力**与**连击次数**共用这一个类型。
  *
  * **写入即触发变威力重算**——官方对"威力"的定义就是这个规则本身：
  *   「威力：当命中效果对技能威力值进行修改时，**会以当前状态重新进行伤害结算覆盖原本的伤害值**」
  *   （reference L128《官方名词解释—1》）
  * 关键是触发条件是"威力被**改过**"，而不是"威力变了"：**提升 0 点威力也算变威力**
  * （L453《机制解析—变威力》：「提升0点威力也属于变威力」；L173 同旨"就算是0连击，他也是变威力效果"）。
- * 所以不能做前后值比较，必须记录"有人写过"。
+ * 所以不能做前后值比较，必须记录"有人写过"。连击同理——官方把"n次连击"与"威力提升n%/n点"
+ * **并列为变威力效果**（L453），所以写连击数也是"声明这是变威力"。
  *
  * 因此这里不用裸 int + "记得调 helper"：`view[owner] = x` / `view[owner] += x` **自动**置
  * `rewritten`，插件侧零纪律成本（少写一行就是 CLAUDE.md §5.10 那种"改了没反应"的静默失败）。
- * 引擎自己的两次写入走 `materialize()`（不打标记），见下。
+ * 引擎自己的写入走 `materialize()`（不打标记），见下。
  *
  * 消费路径：`handle_Battle{First,Second}AttackDamage` 在时点桶跑完、伤害管线开跑**之前**
- * 检查 `rewritten` —— 命中就"推翻第一次、以当前状态（含已归零的双防 / 当前能力等级 /
- * 当前克制系数）重算第二次"，第二次整体覆盖第一次。
+ * 检查（`apply_variable_power_recalc`）——命中就"推翻第一次、以当前状态（含已归零的双防 /
+ * 当前能力等级 / 当前克制系数 / 连击次数）重算第二次"，第二次整体覆盖第一次。
  *
- * `value` 语义：**-1 = 未物化**（`calculateDamage` 回退 `skill.power`）；
- * **0 是合法值**——强制执行打盔时故意置 0 来"只有效果、没有红伤"（用户 2026-09-13 口径）。
+ * `value` 语义按槽各自约定：威力视图 **-1 = 未物化**（`calculateDamage` 回退 `skill.power`），
+ * **0 是合法值**（强制执行打盔故意置 0 → "只有效果、没有红伤"，用户 2026-09-13 口径）；
+ * 连击视图默认 **1**（单段），>1 才算连击。
  */
-struct SkillPowerView {
+struct SkillView {
     int value = -1;
     bool rewritten = false;
 
     // 效果侧写入（`ws.skill_power_view[owner] = x` / `+= x`）→ 自动打"变威力"标记
-    SkillPowerView& operator=(int v) { value = v; rewritten = true; return *this; }
-    SkillPowerView& operator+=(int v) { value += v; rewritten = true; return *this; }
+    SkillView& operator=(int v) { value = v; rewritten = true; return *this; }
+    SkillView& operator+=(int v) { value += v; rewritten = true; return *this; }
     // 读点零改动（`int v = ws.skill_power_view[i]` / `== n` / `<< view`）
     operator int() const { return value; }
 
@@ -69,7 +76,7 @@ struct SkillPowerView {
     void consume() { rewritten = false; }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const SkillPowerView& v) {
+inline std::ostream& operator<<(std::ostream& os, const SkillView& v) {
     return os << v.value;
 }
 
@@ -201,9 +208,18 @@ struct BattleWorkspace {
     // SKILL_EFFECT 时点修改它，ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值。
     // ⚠️ **-1 = 未物化**（calculateDamage 回退 skill.power）；**0 是合法值**——强制执行打盔时
     //    故意置 0 来"只有效果、没有红伤"（用户 2026-09-13 口径）。
-    // ⚠️ 类型是带标记的 `SkillPowerView`：**效果写它 = 声明"这是变威力"** → ATTACK_DAMAGE
+    // ⚠️ 类型是带标记的 `SkillView`：**效果写它 = 声明"这是变威力"** → ATTACK_DAMAGE
     //    收尾据此重算第二次（详见结构体注释）。读点因 `operator int()` 无感。
-    SkillPowerView skill_power_view[2];
+    SkillView skill_power_view[2];
+
+    //========== 连击次数视图层（"1回合做 x~y 次攻击"）==========
+    // 本次技能的连击次数 N：resolve_skill_execution 按 `Skills::roll_combo_count()` 掷一次
+    // （**每次技能使用掷一次**，第一次/第二次结算共用同一个 N），效果可再加。
+    // 伤害是"**一次公式 × N**"（不是 N 次独立结算），`×N` 打在 base 上 →
+    // 增伤/减伤/护盾/次数型免伤全部作用于**总数**。默认 1（单段）。
+    // ⚠️ N > 1 本身就是"这是变威力技能"（官方把"n次连击"列为变威力描述）→ 触发第二次结算，
+    //    否则 ×N 吃到的是破防前的能力等级（连击就享受不到暴击破防）。
+    SkillView combo_view[2];
 
     //========== 技能替换：kExecOnly 载体（艾欧丽娅式，见 SkillReplaceSource 注释）==========
     // "执行什么技能"的唯一取用点是 battleFsm.cpp 的 resolve_executing_skill；
@@ -258,6 +274,9 @@ struct BattleWorkspace {
             // 否则"没物化过就按 skill.power 算"的回退分支永远走不到。
             skill_power_view[i].value = -1;
             skill_power_view[i].rewritten = false;
+            // 连击次数默认 1（单段）。memset 会清成 0，而 0 段是非法值 → 必须显式恢复。
+            combo_view[i].value = 1;
+            combo_view[i].rewritten = false;
             skill_effect_source[i] = SkillReplaceSource{};  // 未替换 → 用本槽位技能（memset 后须显式恢复默认）
         }
     }

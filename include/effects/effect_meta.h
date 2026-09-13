@@ -32,6 +32,7 @@ enum class EffectCategory {
     Shield,        // 护盾/护罩
     Drain,         // 吸取
     Penetration,   // 穿透凭证（697"无视伤害限制"/699"无视攻击免疫"，请求携带而非可执行效果）
+    Combo,         // 连击（"1回合做 x~y 次攻击"一族；官方把"n次连击"列为变威力效果）
     Other,         // 已分析但不属于上述类别
 };
 

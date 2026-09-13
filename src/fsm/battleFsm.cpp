@@ -226,6 +226,9 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
     // ⚠️ 用 `materialize()` 而**不是** `=`：物化是引擎打底，不算"效果改威力"，
     //    不该触发变威力重算（`=` 会置 rewritten 标记）。
     ctx->ws.skill_power_view[robot_id].materialize(skill.power);
+    // 连击次数视图层：**每次技能使用掷一次**（"1回合做 x~y 次攻击"的 x~y 是随机区间），
+    // 第一次/第二次结算与多段共用同一个 N。无连击模板的技能是 1~1，掷点短路不消耗 rand()。
+    ctx->ws.combo_view[robot_id].materialize(skill.roll_combo_count());
     // 技能元素视图层：克制计算用的系别打底物化 skill.element，效果可改（"以XX系别算克制"）。
     ctx->ws.skill_element_view[robot_id][0] = skill.element[0];
     ctx->ws.skill_element_view[robot_id][1] = skill.element[1];
@@ -233,8 +236,9 @@ void resolve_skill_execution(BattleContext* ctx, int robot_id, State trigger_sta
     write_skill_resolution(ctx, robot_id, result, flags);
     // 变威力标记清零：`execute()` 里的**强制执行置 0**（query_usage ②.0）是引擎行为不是效果改写，
     // 连同上面的物化一起在这里清掉。此后 SKILL_EFFECT / ATTACK_DAMAGE 桶里的任何写入都算
-    // "效果改了威力" → ATTACK_DAMAGE 收尾重算第二次。每次技能执行清一次 → 不跨技能泄漏。
+    // "效果改了威力/连击数" → ATTACK_DAMAGE 收尾重算第二次。每次技能执行清一次 → 不跨技能泄漏。
     ctx->ws.skill_power_view[robot_id].consume();
+    ctx->ws.combo_view[robot_id].consume();
     // 米修莉式转换"用后即耗"：本次技能（无论命中/miss/被盔封）已按替换技能结算完毕，
     // pending 到此消费（"对手**下次**技能转化为摸摸"——下次再触发需要重新施加印记）。
     // 只在"真的结算了一次技能"时消费：被控/切宠跳过主流程不经过这里，转换留给下次。
@@ -372,6 +376,18 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
         snapshot.base = snapshot.base * (100 + effective_bonus) / 100;
         snapshot.isCrit = true;
     }
+    // ★ 连击（"1回合做 x~y 次攻击"）：官方是**一次伤害公式 ×N**，不是 N 次独立结算
+    //   （L101 公式 / L99 取整顺序），且 `×连击次数` 排在公式**最后**
+    //   （本系修正 → 克制 → 浮动 → 暴击抗性 → 暴击系数 → **连击次数**）——
+    //   所以放在暴击乘完之后、快照落地之前。N 由 `resolve_skill_execution` 每次使用掷一次。
+    //   ⚠️ 乘在 `base` 上（而不是单独挂一个字段）是刻意的：下游 deal_damage／伤害管线／日志
+    //   全都只消费 final → 增伤/减伤/护盾/**次数型免伤**自动作用于**总数**，
+    //   这正是"一次公式 ×N"的官方语义（"免疫下1次攻击伤害"该吞掉整段，而不是只挡第一段）。
+    const int combo_count = std::max(1, static_cast<int>(ctx->ws.combo_view[attacker_id]));
+    if (combo_count > 1) {
+        snapshot.base = snapshot.base * combo_count;
+    }
+    snapshot.hitCount = combo_count;
     snapshot.afterAdd = snapshot.base;
     snapshot.afterMul = snapshot.base;
     snapshot.final = snapshot.base;
@@ -421,7 +437,7 @@ void apply_crit_defense_break(BattleContext* ctx, int attacker_id) {
 //   「当命中效果对技能威力值进行修改时，会以当前状态重新进行伤害结算覆盖原本的伤害值」（L128）
 // 「提升0点威力也属于变威力」（L453）、「就算是0连击，他也是变威力效果」（L173）都印证
 // 触发看的是"有人写过视图"而非前后值差——所以判据是 `ws.skill_power_view[id].rewritten`，
-// 由 `SkillPowerView::operator=`/`operator+=` 自动置位（效果侧零纪律成本）。
+// 由 `SkillView::operator=`/`operator+=` 自动置位（效果侧零纪律成本）。
 //
 // 时点：`execute_registered_actions(ATTACK_DAMAGE)` **之后**、`damage_pipeline_.run()` **之前**。
 //   · 破防（`apply_crit_defense_break`）已经发生 → 第二次天然读到归零后的双防
@@ -443,11 +459,20 @@ void apply_variable_power_recalc(BattleContext* ctx, int attacker_id) {
     if (!ctx || attacker_id < 0 || attacker_id > 1) {
         return;
     }
-    if (!ctx->ws.skill_power_view[attacker_id].rewritten) {
+    // 三个触发源（官方都归在"变威力"名下）：
+    //   ① 威力被效果改过（含改 0 点）；② 连击次数被效果改过；
+    //   ③ **本次是多段**（N>1）——"n次连击"本身就在官方的变威力描述清单里（L453），
+    //      且用户 2026-09-14 裁定连击走"破防 → 按归零双防重算单次 → ×N"这条流水线。
+    const bool variable_power =
+        ctx->ws.skill_power_view[attacker_id].rewritten
+        || ctx->ws.combo_view[attacker_id].rewritten
+        || static_cast<int>(ctx->ws.combo_view[attacker_id]) > 1;
+    if (!variable_power) {
         return;
     }
     stage_simple_attack_damage(ctx, attacker_id);   // 第二次：以当前状态重算，覆盖第一次
     ctx->ws.skill_power_view[attacker_id].consume();
+    ctx->ws.combo_view[attacker_id].consume();
 }
 
 void apply_resolved_damage(BattleContext* ctx) {
@@ -491,6 +516,7 @@ void apply_resolved_damage(BattleContext* ctx) {
         << " 对 " << defender_id << "号机器人"
         << defender.name
         << " 造成红伤=" << red_damage
+        << (damage.hitCount > 1 ? ("（" + std::to_string(damage.hitCount) + "连击）") : "")
         << " 固定伤害=" << fixed_damage
         << " 百分比伤害=" << percent_damage
         << " hp:" << hp_before << "->" << defender.hp;

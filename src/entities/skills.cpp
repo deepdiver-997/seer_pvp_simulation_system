@@ -40,6 +40,37 @@ bool monster_has_skill(const official_data::MonsterRecord& monster, int skill_id
     );
 }
 
+// 连击模板（"1回合做 x~y 次攻击"）：effect_id → （下限参数下标, 上限参数下标）。
+//
+// 官方这一族共 20 条模板 / 158 个技能引用（`effect_info` 实测），本轮只取**静态 x~y 区间**那一层
+// （12 条）。参数位置几乎都是 `{0}-{1}`，只有 1172/1577 是 `{0}回合做{1}-{2}次`（前面多一个回合数）。
+// ⚠️ 只解析**参数下标**、不碰 `effect_info.info` 文本——文本解析是既定的脆弱层，官方换措辞就挂。
+// 认证数据层方向：将来可迁 `custom_effect_overrides(override_type='combo')`，现在先落开关表。
+// 未覆盖（见 docs/05-任务清单/待做-变威力与增减伤时点.md §2）：
+//   · 动态加数 484 / 1108 / 1795 / 1863 / 1930（基数固定、靠计数器加）
+//   · 连击上限修正 1500 / 1546 / 1577 / 1593 / 1627 / 1666 / 1685（需"护盾/蓄力/PP/体力/领域/异常"谓词）
+//   · 无参数常量 1608 / 1609 / 1610（区间写死在文案里）
+std::optional<std::pair<int, int>> combo_arg_indices(int effect_id) {
+    switch (effect_id) {
+        case 1172:  // {0}回合做{1}~{2}次攻击，每次攻击都有{3}%的概率令自身{4}
+        case 1577:  // {0}回合做{1}-{2}次攻击，当前技能PP值小于{3}时连击上限为{4}
+        case 1627:  // {0}回合做{1}-{2}次攻击，若本回合攻击次数达到最大则必定秒杀对手
+            return std::make_pair(1, 2);
+        case 1141:  // 1回合做{0}~{1}次攻击，每次攻击{2}%令对手{3}，攻击低于{4}次则…
+        case 1454:  // 1回合做{0}-{1}次攻击，每次攻击有{2}%的概率附加{3}点固定伤害
+        case 1455:  // 1回合做{0}-{1}次攻击，若本回合攻击次数达到最大则…必定秒杀对手
+        case 1500:  // 1回合做{0}-{1}次攻击，自身处于护盾状态下连击上限为{2}
+        case 1546:  // 1回合做{0}-{1}次攻击，自身每存在1层蓄力则连击上限次数额外增加{2}次
+        case 1593:  // 1回合做{0}-{1}次攻击，自身体力低于对手时连击上限为{2}
+        case 1666:  // 1回合做{0}-{1}次攻击，自身处于领域效果下连击上限为{2}
+        case 1685:  // 1回合做{0}-{1}次攻击，对手处于异常状态时连击上限为{2}
+        case 1732:  // 激发古渊灵鱼全部的力量，1回合做{0}-{1}次攻击
+            return std::make_pair(0, 1);
+        default:
+            return std::nullopt;
+    }
+}
+
 // 效果注册时点（后续数据化：从 effect_info / side_effect 表查 register_state 列）
 State effect_register_state(int effect_id) {
     switch (effect_id) {
@@ -214,6 +245,19 @@ bool Skills::loadSkills() {
     parsed_units_.reserve(rawEffectRecords.size() * 3 + 4);
 
     for (const auto& effect_record : rawEffectRecords) {
+        // 连击（"1回合做 x~y 次攻击"）：从本效果自己的参数里取下/上限，填技能静态基数。
+        // ⚠️ **不 continue**——这些模板的其余子句（如 1172 的"每次攻击X%概率令自身Y"）现在由
+        //    下方注册/解析路径部分覆盖着，跳过会回归。这里只是"顺路取个数"。
+        if (const auto combo_idx = combo_arg_indices(effect_record.effect_id)) {
+            const auto& a = effect_record.args;
+            const std::size_t hi = static_cast<std::size_t>(combo_idx->second);
+            if (a.size() > hi) {
+                const int lo = std::max(1, a[static_cast<std::size_t>(combo_idx->first)]);
+                const int up = std::max(1, a[hi]);
+                combo_min = std::min(lo, up);
+                combo_max = std::max(lo, up);
+            }
+        }
         // 穿透类效果（697"无视伤害限制"/699"无视攻击免疫"）→ 并入本技能穿透凭证，
         // 不注册普通分支。理由：穿透在 query_usage 门判定（效果注册之前）就消费，
         // 697/699 是 args_num=0 的纯标记模板，注册成 HIT 分支既无函数可执行也时机太晚。

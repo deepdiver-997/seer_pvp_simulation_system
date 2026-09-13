@@ -1,6 +1,8 @@
 #ifndef SKILLS_H
 #define SKILLS_H
 
+#include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
@@ -100,6 +102,8 @@ public:
         , accuracy(other.accuracy)
         , must_hit(other.must_hit)
         , critical_strike_rate(other.critical_strike_rate)
+        , combo_min(other.combo_min)
+        , combo_max(other.combo_max)
         , penetration_flags(other.penetration_flags)
         , priority(other.priority)
         , element{other.element[0], other.element[1]}
@@ -195,6 +199,27 @@ public:
     int accuracy;
     bool must_hit = false;   // 必中：命中结算无视命中率
     float critical_strike_rate;
+
+    //========== 连击（"1回合做 x~y 次攻击"）==========
+    // 官方把"n次连击"与"威力提升n%/n点"并列为**变威力效果**（L453），伤害是
+    // **一次伤害公式 × N**（不是 N 次独立结算），`×连击次数` 排在公式最后
+    // （浮动 → 暴击抗性 → 暴击系数 → 连击次数，L101/L99）。
+    // 静态基数从技能自己的 side_effect 参数里取（`combo_arg_indices` 开关表），
+    // 每次技能使用掷一次写进 `ws.combo_view[owner]`；无连击模板的技能是 1~1（退化）。
+    // ⚠️ 目前只覆盖"静态 x~y 区间"那一层（12 个模板）；动态加数（1108/484/1795/1863/1930）
+    //    与"连击上限修正"（1500/1546/…）见 docs/05-任务清单/待做-变威力与增减伤时点.md §2。
+    int combo_min = 1;
+    int combo_max = 1;
+
+    // 连击次数掷点：**每次技能使用掷一次**，第一次/第二次结算共用同一个 N。
+    // 区间退化（min==max，绝大多数技能是 1~1）时**不消耗 rand()** —— 与"暴击率 0 短路"同理，
+    // 保证没有连击的既有场景 rand 序列逐字节不变。
+    int roll_combo_count() const {
+        if (combo_max <= combo_min) {
+            return std::max(1, combo_min);
+        }
+        return combo_min + (std::rand() % (combo_max - combo_min + 1));
+    }
     // 技能请求凭证（697"无视伤害限制"/699"无视攻击免疫"/强制执行等效果模板经 effect_meta 识别后合并）。
     // 攻击时由 materialize_attack_credential 并入 ws.attack_credential，作为"请求携带的凭证"，
     // 在 query_usage 门判定（先于效果注册）消费。force_execute 非穿透但同族（凭证位）。
