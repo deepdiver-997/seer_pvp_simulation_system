@@ -2,17 +2,8 @@
 .github/skills/
 .claude/
 build/
+# 测试全部本地维护（场景用例 + 基架在 docs_local/test/scenario/），不入库
 test/
-# 场景化对战测试（每场景一个二进制）纳入版本控制；test.cpp 冒烟单测仍忽略
-!test/
-!test/scenario/
-!test/scenario/scenario_harness.h
-!test/scenario/scenario_a.cpp
-!test/scenario/scenario_b.cpp
-!test/scenario/scenario_c.cpp
-!test/scenario/scenario_d.cpp
-!test/scenario/scenario_e.cpp
-test/test.cpp
 .gitignore
 .DS_Store
 .git/
