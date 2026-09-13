@@ -1,4 +1,4 @@
-# 《赛尔号》PVP战斗系统 - FSM实现进度报告
+# 《原作游戏》PVP战斗系统 - FSM实现进度报告
 
 **报告时间**: 2026年  
 **项目阶段**: FSM状态机完善实现  
@@ -79,7 +79,7 @@ struct DamageSnapshot {
  * - 上限为100%（防止负伤害）
  * 
  * 乘算减伤 (damage_reduce_mul):
- * - 无上限约束（源于《赛尔号》官方机制）
+ * - 无上限约束（源于《原作游戏》官方机制）
  * - 但效果递减：每层乘算都会稀释最终伤害
  */
 int applyDamageReduction(int baseDamage, 
