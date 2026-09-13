@@ -24,11 +24,11 @@
 | [include-effects.md](include-effects.md) | `include/effects/` 效果内核 | §3.3 效果系统 / §3.6 异常免疫断回合 / §3.7 伤害管线 |
 | [include-fsm.md](include-fsm.md) | `include/fsm/` 调度层 | §3.1 数据流 / §3.2 状态机与时点桶 |
 | [src-地图.md](src-地图.md) | `src/` 实现层 + 可运行目标 | §1 构建 / §3 分层 |
-| [resources-lib.md](resources-lib.md) | `resources/moves_lib` `resources/soul_lib` 插件 | §3.9 插件约束 → 进去先从这读 |
+
+> 注：效果插件（`resources/*_lib`）为本地维护，不入库，无公开导航文档。
 
 ## 推荐的阅读顺序（新同事）
 
 1. `CLAUDE.md` 全文（架构地图，含数据流 + 所有坑）。
-2. 从 `resources-lib.md` 开始（插件是效果落地的入口，和"真实精灵"最近）。
-3. 沿一条效果链路读 `include-effects.md` → `include-entities.md` → `include-fsm.md`。
-4. 用到哪读到哪，需要"为什么"再下沉到专题文档。
+2. 沿一条效果链路读 `include-effects.md` → `include-entities.md` → `include-fsm.md`。
+3. 用到哪读到哪，需要"为什么"再下沉到专题文档。

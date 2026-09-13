@@ -132,5 +132,5 @@ pending_effects[State][side]    → 延迟/观察型效果，满足条件时触�
 | Mark 系统 | `include/entities/mark.h` |
 | 魂印定义 | `include/entities/soul_mark.h` |
 | 伤害计算 | `include/numerical-calculation/calculation.h` |
-| 时点判定文档 | `docs/02-效果系统/时点判定流程表.md` |
+
 | 架构演进记录 | `docs/01-架构与设计/architecture-evolution.md` |

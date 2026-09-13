@@ -29,7 +29,7 @@
 | `sim_training_cli` | `tools/training_cli.cpp` | 训练 CLI |
 | `sim_smoke_test` | `test/test.cpp`（gitignored） | 段式冒烟 |
 | `sim_scenario_0NN_*` | `test/scenario/scenario_0NN_*.cpp`（**GLOB 自动发现，见 docs/07/场景测试说明.md**） | 场景化对战测试 |
-| `moves_plugin` / `soul_plugin` | `resources/moves_lib/lib_1.cpp` / `resources/soul_lib/lib_1.cpp` | 动态库插件（见 resources-lib.md） |
+| `moves_plugin` / `soul_plugin` | `resources/*_lib`（本地维护，不入库） | 效果插件动态库 |
 
 **想改"效果在这个时点到底执行谁" → 进 `battleFsm.cpp` 的 handler；
 想改"这个效果执行后写哪" → 进效果内核 + `battleContext` 收纳盒。**

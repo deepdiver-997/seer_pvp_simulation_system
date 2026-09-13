@@ -5,8 +5,8 @@
 
 | 文件 | 职责（一句话） | 关键入口 / 字段 | 关联文档 |
 |------|--------------|----------------|---------|
-| `skills.h` | **技能**对象：静态数据 + 按执行结果分叉的效果分支 | `effectBranches`(map<SkillExecResult, vector<SkillEffectNode>>)、`selection_effects_`（选技能注册先制）、`loadSkills()`（DB）、`register_branch()`（注册到桶）、`resolve_executing_skill()`（替换取用点）、`cancel_next_parsed_condition()`、`parsed_units_` | CLAUDE.md §3.4、`docs/02/技能判定流程与无效效果体系.md`§七 |
-| `soul_mark.h` | **魂印**对象 = 程序化效果节点序列 | `SoulMark`=`vector<SoulMarkNodeRef{trigger_state, effect_fn, once, early, scope}>`、`SoulMarkNodeRef` | CLAUDE.md §3.5、`docs/02/魂印机制设计与精灵表现档案.md` |
+| `skills.h` | **技能**对象：静态数据 + 按执行结果分叉的效果分支 | `effectBranches`(map<SkillExecResult, vector<SkillEffectNode>>)、`selection_effects_`（选技能注册先制）、`loadSkills()`（DB）、`register_branch()`（注册到桶）、`resolve_executing_skill()`（替换取用点）、`cancel_next_parsed_condition()`、`parsed_units_` | CLAUDE.md §3.4 |
+| `soul_mark.h` | **魂印**对象 = 程序化效果节点序列 | `SoulMark`=`vector<SoulMarkNodeRef{trigger_state, effect_fn, once, early, scope}>`、`SoulMarkNodeRef` | CLAUDE.md §3.5 |
 | `soul_mark_manager.h` | **魂印注册管理**：程序/钩子登记 + 上场激活 | `activate_soul_mark()`（战斗开始+切换上场，扫全部6槽）、`registerSoulMarkProgram(id,nodes)`、`registerSoulMarkHooks(id,hooks)`、`registerSoulMark(id,fn)` | CLAUDE.md §3.5 |
 | `elf-pet.h` | **精灵本体**：数值 + 抗性 + 护盾 + 持久槽 | `soulmark_storage`（`map<int,std::any>` 持久槽，pl/:场景H）、`damage_resist`（本体抗性）、`shield_bank_`/`hood_bank_`（护盾/护罩）、`marks`、`resistance`（异常抗性） | CLAUDE.md §3.7/3.8/3.10 |
 | `pet_factory.h` | 运行时**数据初始化**工厂 | `initialize_runtime_data()`（相对路径 `scripts/data/processed/seer_unity.sqlite` + 加载插件 DDL） | CLAUDE.md §1（必须从项目根跑） |
