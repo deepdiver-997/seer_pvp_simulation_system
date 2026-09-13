@@ -145,7 +145,8 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute, bool attack,
                 int count, int duration_rounds = 0, bool penetrable = true,
                 int source_slot = -1, EffectScope scope = EffectScope::ON_STAGE,
-                bool hit_invalid = false, int chance_pct = 100);
+                bool hit_invalid = false, int chance_pct = 100,
+                bool consumed_when_pierced = false);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。

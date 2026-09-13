@@ -327,7 +327,7 @@ FixedDamageResult deal_pink_damage(BattleContext* ctx, int target, int amount,
 
 void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute,
                 bool attack, int count, int duration_rounds, bool penetrable, int source_slot,
-                EffectScope scope, bool hit_invalid, int chance_pct) {
+                EffectScope scope, bool hit_invalid, int chance_pct, bool consumed_when_pierced) {
     if (!ctx || source < 0 || source > 1 || target < 0 || target > 1 || count <= 0) {
         return;
     }
@@ -359,11 +359,13 @@ void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool 
     if (duration_rounds > 0) {
         ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
                                      /*counts=*/0, duration_rounds, penetrable, scope,
-                                     std::move(condition), ctx->round_effect_valid_id[source]);
+                                     std::move(condition), ctx->round_effect_valid_id[source],
+                                     consumed_when_pierced);
     } else {
         ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
                                      count, /*rounds=*/0, penetrable, scope,
-                                     std::move(condition), ctx->round_effect_valid_id[source]);
+                                     std::move(condition), ctx->round_effect_valid_id[source],
+                                     consumed_when_pierced);
     }
 }
 

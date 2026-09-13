@@ -474,7 +474,26 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
     //    它**天生只响应属性技能**（781 秩序之助原文："令对手使用的**属性技能**无效"），
     //    与 ③层"命中效果失效"（下面 ②.5）**不是同一件事**——后者攻击/属性技能都可能。
     const SkillInvalidNotifyResult nr = ctx->rule_center_.notify(
-        ctx, owner, is_attribute, this->power, cred.ignore_attack_immunity);
+        ctx, owner, is_attribute, this->power, cred.ignore_attack_immunity,
+        // 盔/威/封属**真正生效**（未被穿、条件通过）→ 发事件，供"触发成功则…"类后续子句挂钩。
+        // 被穿的盔不走这里 → 子句天然不触发（用户 2026-09-13 口径，无需特判）。
+        [ctx, owner](int source_effect_id, int source_owner) {
+            ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_ARMOR_TRIGGERED,
+                                                source_owner, owner, source_effect_id});
+        });
+
+    // ②.0 强制执行（用户 2026-09-13 口径）：盔/威/封属**照常响应与消耗**（上面 notify 已经做了），
+    //   但**不让命中拦截生效**——直接返回 OK，让技能效果照常注册；同时把**本次技能的视图威力置 0**，
+    //   于是非变威力技能"只有效果、没有红伤"。
+    //   变威力类效果（如 2501「技能无效时，**重新进行伤害结算**且…」）会在效果生效时
+    //   **重新设置视图威力**并结算伤害管线 → 照样能打出红伤。
+    //   （③层命中效果失效仍被强制执行绕过——见 §六"无为觉者·强制执行无视命中效果失效"。）
+    if (cred.force_execute) {
+        if (nr != SkillInvalidNotifyResult::NONE) {
+            ctx->ws.skill_power_view[owner] = 0;
+        }
+        return SkillUsageResult::OK;
+    }
     if (nr == SkillInvalidNotifyResult::INVALID) {
         return SkillUsageResult::SEALED;      // 被无效（盔/威/封属）→ SKILL_INVALID + 补偿
     }

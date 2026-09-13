@@ -18,7 +18,11 @@ class Calculation {
         double Defense = ws.getTempAbilityValue(defender, static_cast<NumericalPropertyIndex>(static_cast<int>(skill.type) + 2));
         // 技能威力视图层：ws.skill_power_view（效果可改，如威力提升/随机威力）优先，
         // 未物化(0)回退技能静态 power。
-        const int power = ws.skill_power_view[attacker] > 0 ? ws.skill_power_view[attacker] : skill.power;
+        // ⚠️ 哨兵是 **-1（未物化）** 而不是 0：视图威力 0 是一个**合法值**——强制执行打盔时
+        //    故意把视图威力置 0 来"只有效果、没有红伤"（用户 2026-09-13 口径），
+        //    若还按"> 0 才用视图"判，就会被回退成 skill.power 而打出满伤害。
+        const int view = ws.skill_power_view[attacker];
+        const int power = view >= 0 ? view : skill.power;
         // 技能元素/克制倍率视图层：
         // - 克制按"技能元素视图" vs 防御方元素算（官方机制：克制 = 技能系别 vs 防御方系别，
         //   非攻击方精灵系别——"以XX系别计算克制倍数"类效果改写 skill_element_view）。

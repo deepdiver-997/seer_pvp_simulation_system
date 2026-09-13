@@ -29,6 +29,13 @@ enum class EventType {
     EVENT_OPPONENT_DEFEATED, // 击败对手
     EVENT_SKILL_INVALID,     // 技能无效/未命中（Skills::execute 中 emit，target = 对方）
     EVENT_ATTACK_BLOCKED,    // 攻击被拦下/归零（apply_resolved_damage 中 final<=0 时 emit）
+    // 盔/威/封属**真正生效**（RuleCenter::notify 扫到一条未被穿透、条件通过的拦截条目时 emit）。
+    // actor = 挂载方(source_owner)，target = 被拦方(user)，**amount = 该条目的 source_effect_id**。
+    // 用途：带后续子句的盔的"触发成功则…"（如 2006「免疫成功则令对手全属性+1」、
+    //   2270「触发成功则{X}%令对手{异常}」）——插件按 effect_id 匹配自己的盔即可挂子句。
+    // ⚠️ **被穿（penetrable + 穿盔凭证）的盔不会走这里** → 子句天然不触发，无需特判
+    //   （用户 2026-09-13 口径）。
+    EVENT_SKILL_ARMOR_TRIGGERED,
 };
 
 /**

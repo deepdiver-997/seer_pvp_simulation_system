@@ -46,7 +46,8 @@ struct CoreApi {
     // chance_pct<100 = 概率封属（每次响应时掷，695/936 用）。
     void (*seal_skill)(BattleContext*, int source, int target, int effect_id, bool attribute,
                        bool attack, int count, int duration_rounds, bool penetrable,
-                       int source_slot, EffectScope scope, bool hit_invalid, int chance_pct);
+                       int source_slot, EffectScope scope, bool hit_invalid, int chance_pct,
+                       bool consumed_when_pierced);
     // 反转目标自身能力下降（负等级→提升）。区别于 clear_stat_boosts（消除提升）。
     StatReversalResult (*stat_reversal)(BattleContext*, int target);
     // 反转目标的**能力提升**（正→等负，"反转对手能力提升"）。弱化类动作 →

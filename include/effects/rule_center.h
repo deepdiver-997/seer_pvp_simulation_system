@@ -111,6 +111,14 @@ struct RuleTicket {
 
     // ── 封属(SEAL)参数 ──────────────────────────────────
     bool penetrable = true;        // 可否被"无视攻击免疫"穿透（条件盔/龙威=false）
+    // **被穿透时是否消耗次数**（用户 2026-09-13 实测口径——可穿盔不是铁板一块）：
+    //   true  = 被穿也扣一次（盔模板**带后续子句**的：2270「触发成功则{X}%令对手{异常}」、
+    //           2006「免疫成功则令对手全属性+1」、1288「未触发则…」、1293「免疫成功则自身全属性+N」）
+    //   false = 被穿**保留**次数（**裸**的"免疫下{N}次对手的攻击"：570、2269、2203）
+    // 实测样本：赫星千年(2270) 被穿消耗 / 火种永存(570) 被穿保留 /
+    //           无念归空净(2006) 被穿消耗 / 遗颂(2269) 被穿保留。
+    // 回合类不看这个：回合类被穿是否结束，取决于穿盔技能**有没有断回合效果**。
+    bool consumed_when_pierced = false;
     std::function<bool(BattleContext*, int attacker, int defender)> condition;  // 条件（nullptr=无条件）
 
     // ── 消费 / 生命周期 ─────────────────────────────────
@@ -253,7 +261,8 @@ public:
                     SealKind kind, int counts, int rounds, bool penetrable,
                     EffectScope scope = EffectScope::ON_STAGE,
                     std::function<bool(BattleContext*, int, int)> condition = nullptr,
-                    int source_valid_id = 0) {
+                    int source_valid_id = 0,
+                    bool consumed_when_pierced = false) {
         // 允许次数型(counts>0)或回合型(rounds>0)，至少其一（回合型正常 counts=0）。
         if (source_owner < 0 || source_owner > 1 || target < 0 || target > 1
             || (counts <= 0 && rounds <= 0)) {
@@ -270,6 +279,7 @@ public:
                 t.remaining_counts = counts;
                 t.remaining_rounds = rounds;
                 t.penetrable = penetrable;
+                t.consumed_when_pierced = consumed_when_pierced;
                 t.condition = std::move(condition);
                 t.source_valid_id = source_valid_id;  // 来源效果被断→随断回作废
                 recount();
@@ -285,6 +295,7 @@ public:
         t.category = RuleCategory::SEAL;
         t.subtype = static_cast<int>(kind);
         t.penetrable = penetrable;
+        t.consumed_when_pierced = consumed_when_pierced;
         t.remaining_counts = counts;
         t.remaining_rounds = rounds;
         t.condition = std::move(condition);
@@ -362,8 +373,12 @@ public:
         return is_immune(target, type, timing_bit, current_round, status_id, /*soul_filter=*/1);
     }
 
+    // on_armor_triggered（可选）：**真正生效**（未被穿透、条件通过）的拦截条目逐条回调，
+    // 参数 = (source_effect_id, source_owner)。用途：带后续子句的盔的"触发成功则…"
+    // （插件按 effect_id 匹配自己的盔挂子句）。⚠️ 被穿的盔**不会**回调 → 子句天然不触发。
     SkillInvalidNotifyResult notify(BattleContext* ctx, int user, bool is_attribute_skill,
-                                    int power, bool ignore_attack_immunity) {
+                                    int power, bool ignore_attack_immunity,
+                                    const std::function<void(int, int)>& on_armor_triggered = nullptr) {
         if (user < 0 || user > 1) {
             return SkillInvalidNotifyResult::NONE;
         }
@@ -384,8 +399,22 @@ public:
                 continue;
             }
             if (t.penetrable && ignore_attack_immunity) {
+                // 被穿：按模板判据决定消不消耗（用户 2026-09-13 实测——可穿盔不是铁板一块）：
+                //   带后续子句的盔（2270/2006/1288/1293）被穿**消耗**；
+                //   裸的"免疫下{N}次对手的攻击"（570/2269/2203）被穿**保留**。
+                // 两种都**不算生效** → 不进 on_armor_triggered、不计 any_invalid。
+                if (t.consumed_when_pierced && t.remaining_counts > 0) {
+                    --t.remaining_counts;
+                    if (t.remaining_counts <= 0) {
+                        it = all_.erase(it);
+                        continue;
+                    }
+                }
                 ++it;
                 continue;
+            }
+            if (on_armor_triggered) {
+                on_armor_triggered(t.source_effect_id, t.source_owner);
             }
             if (t.is_hit_invalid_seal()) {
                 any_hit_invalid = true;

@@ -157,7 +157,8 @@ struct BattleWorkspace {
     // 本回合视角的技能威力：攻击时由 resolve_skill_execution 物化 skill.power，
     // 效果（如无相谛 179"属性相同威力提升"、未来黯玉咒言随机/累积威力）在
     // SKILL_EFFECT 时点修改它，ATTACK_DAMAGE 阶段 calculateDamage 从 ws 读最终值。
-    // 0 = 未物化（calculateDamage 回退 skill.power）。
+    // ⚠️ **-1 = 未物化**（calculateDamage 回退 skill.power）；**0 是合法值**——强制执行打盔时
+    //    故意置 0 来"只有效果、没有红伤"（用户 2026-09-13 口径）。
     int skill_power_view[2];
 
     //========== 技能替换：kExecOnly 载体（艾欧丽娅式，见 SkillReplaceSource 注释）==========
