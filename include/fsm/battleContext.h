@@ -489,6 +489,7 @@ public:
         damage_pipeline_.clear();
         install_default_damage_reduction();
         install_default_damage_block();
+        install_default_damage_amp();
     }
 
     //--- 回合类效果管理 ---
@@ -637,6 +638,20 @@ public:
      * 每次攻击伤害结算前确保已安装（init_battle / clearAllEffects 后调用）。
      */
     void install_default_damage_block();
+
+    /**
+     * 安装默认增伤（AMP 阶段，AMP 类别）。
+     * 把 `ws.damage_add_pct[attacker]`（百分比增伤）与 `ws.damage_add_flat[attacker]`（固定值增伤）
+     * 接进伤害结算管线：final = final * (100 + pct) / 100 + flat。
+     *
+     * ⚠️ 为什么走 ws 而不是让效果直接注册管线回调（"下N回合伤害翻倍"类，如 776/693）：
+     *   管线回调一旦注册就永久驻留，既不能随回合过期、也不能被断回合作废。
+     *   放 ws 后由**回合效果**每回合写入（见 effect_set_damage_amp）：ws 每回合 reset 天然清空，
+     *   效果走时点桶 → 断回合/切换作废免费获得。
+     * 只对攻击方生效（bucket_owner == resolvedDamage.attackerId），防御方的桶不参与。
+     * 每次攻击伤害结算前确保已安装（init_battle / clearAllEffects 后调用）。
+     */
+    void install_default_damage_amp();
 
     /**
      * O(1) 查询目标是否还有回合类效果

@@ -31,6 +31,8 @@ const CoreApi& core_api() {
         /*effect_window_kind=*/&effect_window_kind_impl,
         /*restraint_multiplier=*/&Calculation::calculateRestraintMultiples,
         /*deal_pink_damage=*/&deal_pink_damage,
+        /*pp_reduce=*/&pp_reduce,
+        /*clear_stat_drops=*/&clear_stat_drops,
     };
     return api;
 }

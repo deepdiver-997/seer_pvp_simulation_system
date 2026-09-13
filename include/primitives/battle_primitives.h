@@ -145,7 +145,7 @@ void deal_damage(BattleContext* ctx, int target, int amount,
 void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute, bool attack,
                 int count, int duration_rounds = 0, bool penetrable = true,
                 int source_slot = -1, EffectScope scope = EffectScope::ON_STAGE,
-                bool hit_invalid = false);
+                bool hit_invalid = false, int chance_pct = 100);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。
@@ -242,6 +242,18 @@ HealResult heal_amount(BattleContext* ctx, int target, int amount);
  * 查 `ImmunityType::STAT_CLEAR`（免消除强化）——命中则整次消除失败、返回 0。
  */
 int clear_stat_boosts(BattleContext* ctx, int target);
+
+/**
+ * clear_stat_drops - 消除目标方负等级上的能力下降（"消除双方能力下降状态"）。
+ * 只清弱化（等级 < 0 → 0），不动提升/正等级。返回清掉的下降个数。
+ *
+ * ⚠️ **不查任何免疫**（用户 2026-09-13 口径）：清弱化对目标**有利**，
+ *   免弱(STAT_DROP) 挡的是"施加弱化"、免消除强化(STAT_CLEAR) 护的是"提升"——
+ *   两者都不该挡"把弱化拿掉"。故与 clear_stat_boosts（查 STAT_CLEAR）不对称，
+ *   这是**故意**的，不是漏查。
+ * 本体/视图一并同步（ws.view_levels 是伤害公式的读取源）。
+ */
+int clear_stat_drops(BattleContext* ctx, int target);
 
 /**
  * transfer_stat_boosts - 转换/吸取能力提升：from 的**正等级**整体搬到 to（from 清零、to 等量累加）。

@@ -43,9 +43,10 @@ struct CoreApi {
     StatDropResult (*stat_drop)(BattleContext*, int target, int stat, int amount);
     // 挂"技能拦截"（盔/威/封属，含 hit_invalid 命中失效语义）。属性/攻击/次数/回合/scope 全部可配。
     // source=挂载(施放)方、target=生效(被封)方（统一语义）。
+    // chance_pct<100 = 概率封属（每次响应时掷，695/936 用）。
     void (*seal_skill)(BattleContext*, int source, int target, int effect_id, bool attribute,
                        bool attack, int count, int duration_rounds, bool penetrable,
-                       int source_slot, EffectScope scope, bool hit_invalid);
+                       int source_slot, EffectScope scope, bool hit_invalid, int chance_pct);
     // 反转目标自身能力下降（负等级→提升）。区别于 clear_stat_boosts（消除提升）。
     StatReversalResult (*stat_reversal)(BattleContext*, int target);
     // 反转目标的**能力提升**（正→等负，"反转对手能力提升"）。弱化类动作 →
@@ -66,6 +67,16 @@ struct CoreApi {
     // 插件造粉伤的唯一入口（插件不能直调 deal_damage）；PERCENT_VALUE 的 amount 是具体值。
     FixedDamageResult (*deal_pink_damage)(BattleContext*, int target, int amount,
                                           DamageKind kind, int actor);
+
+    // ⚠️ 新槽一律**追加到末尾**：本结构用位置初始化列表填充（src/effects/core_api.cpp），
+    //    插在中间会让后面所有槽错位（曾连踩两次）。
+    // 降低目标方所有技能 PP（clamp ≥0；`pp == -1` 的无限 PP 技能跳过）。
+    // "归零"传一个大于任何 max_pp 的值即可（插件侧 pp_zero_all helper）。
+    PpReduceResult (*pp_reduce)(BattleContext*, int target, int amount);
+    // 消除目标方**能力下降**（负等级→0）。⚠️ **不查任何免疫**（清弱化对目标有利，
+    // 免弱/免消除强化都不该挡它）——与 clear_stat_boosts（查 STAT_CLEAR）故意不对称。
+    // 返回清掉的项数。
+    int (*clear_stat_drops)(BattleContext*, int target);
 };
 
 // sim_core 暴露的 CoreApi 单例（实际填充）。插件侧不调它；由 core 在初始化时传入。

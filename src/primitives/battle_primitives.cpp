@@ -327,7 +327,7 @@ FixedDamageResult deal_pink_damage(BattleContext* ctx, int target, int amount,
 
 void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute,
                 bool attack, int count, int duration_rounds, bool penetrable, int source_slot,
-                EffectScope scope, bool hit_invalid) {
+                EffectScope scope, bool hit_invalid, int chance_pct) {
     if (!ctx || source < 0 || source > 1 || target < 0 || target > 1 || count <= 0) {
         return;
     }
@@ -341,16 +341,29 @@ void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool 
     if (hit_invalid && attribute && !attack) {
         kind = SealKind::SEAL_ATTRIBUTE_HIT;
     }
+    // 概率封属（如 effect 695「{0}回合内{1}%令对手使用的属性技能无效」）：
+    // 概率**每次响应时**掷（不是授予时掷一次）——官方表现是"每回合都有机会封住"，
+    // 而非"授予时决定这几回合封不封"。走 RuleTicket::condition（notify 逐条求值点）。
+    std::function<bool(BattleContext*, int, int)> condition = nullptr;
+    if (chance_pct < 100) {
+        const int chance = chance_pct <= 0 ? 0 : chance_pct;
+        condition = [chance](BattleContext*, int, int) {
+            if (chance <= 0) {
+                return false;
+            }
+            return (std::rand() % 100) < chance;
+        };
+    }
     // 回合型 / 次数型**二选一**（文档 §5.1）：有 duration 走回合型（remaining_counts 不设，
     // 响应不消耗，靠 tick/断回合结束）；否则走次数型（响应即减，减到 0 注销）。
     if (duration_rounds > 0) {
         ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
                                      /*counts=*/0, duration_rounds, penetrable, scope,
-                                     /*condition=*/nullptr, ctx->round_effect_valid_id[source]);
+                                     std::move(condition), ctx->round_effect_valid_id[source]);
     } else {
         ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
                                      count, /*rounds=*/0, penetrable, scope,
-                                     /*condition=*/nullptr, ctx->round_effect_valid_id[source]);
+                                     std::move(condition), ctx->round_effect_valid_id[source]);
     }
 }
 
@@ -453,6 +466,25 @@ int clear_stat_boosts(BattleContext* ctx, int target) {
         }
     }
     return cleared;  // 0 = 目标本无提升（消强未成功）
+}
+
+int clear_stat_drops(BattleContext* ctx, int target) {
+    if (!ctx || target < 0 || target > 1) {
+        return 0;
+    }
+    // ⚠️ 与 clear_stat_boosts 不对称：**故意不查任何免疫**。
+    //   清弱化对目标有利——免弱(STAT_DROP) 挡"施加弱化"、免消除强化(STAT_CLEAR) 护"提升"，
+    //   都不该挡"把弱化拿掉"（用户 2026-09-13 口径："清理弱化什么都不用查"）。
+    ElfPet& pet = ctx->getPet(target);
+    int cleared = 0;
+    for (int i = 0; i < static_cast<int>(pet.levels.size()); ++i) {
+        if (pet.levels[i] < 0) {  // 只清弱化（负等级），不动提升/正等级
+            pet.levels[i] = 0;
+            ctx->ws.view_levels[target][i] = 0;   // 本体/视图同步（同 clear_stat_boosts）
+            ++cleared;
+        }
+    }
+    return cleared;
 }
 
 // 转换/吸取能力提升：把 from 的**正等级**整体搬到 to 身上（from 清零，to 等量累加）。

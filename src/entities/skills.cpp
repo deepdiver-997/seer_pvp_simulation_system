@@ -215,10 +215,13 @@ bool Skills::loadSkills() {
             penetration_flags.level = std::max(penetration_flags.level, pf.level);
             continue;
         }
-        // 条件先制效果 2000（大雪纷飞/烬灭神咒剑的固有效果：若对手处于能力提升状态则
-        // 先制+1且必定命中）→ selection_effects_（on_selected 统一注册到 MOVE_RIGHT 桶，
-        // 先手权比较前生效）。与基值先制同族；一般化的"选择期效果路由"留数据驱动后续。
-        if (effect_record.effect_id == 2000) {
+        // 选择期先制效果 → selection_effects_（on_selected 统一注册到 MOVE_RIGHT 桶，
+        // 先手权比较前生效）。与基值先制同族——**必须在选技时决定**，注册到 SKILL_EFFECT
+        // 等执行期时点就太晚了（先手权早已结算完）。
+        //   2000 大雪纷飞/烬灭神咒剑：若对手处于能力提升状态则先制+1且必定命中
+        //   610  璨灵圣光：遇到天敌时先制+{0}
+        // 一般化的"选择期效果路由"（按 EffectMeta 分类而非硬编码 id）留数据驱动后续。
+        if (effect_record.effect_id == 2000 || effect_record.effect_id == 610) {
             Effect sel = clone_effect(effect_record.effect_id, build_effect_args_for_skill(effect_record));
             if (sel.logic) {
                 selection_effects_.push_back(

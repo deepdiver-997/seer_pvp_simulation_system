@@ -133,6 +133,7 @@ void BattleContext::init_battle() {
     roundChoice[1][1] = -1;
     install_default_damage_reduction();
     install_default_damage_block();
+    install_default_damage_amp();
 }
 
 void BattleContext::install_default_damage_reduction() {
@@ -196,6 +197,43 @@ void BattleContext::install_default_damage_block() {
                 damage.final = 0;
                 damage.addPct = 0;
                 damage.mulCoef = 0.0;
+            }
+        );
+    }
+}
+
+void BattleContext::install_default_damage_amp() {
+    for (int owner = 0; owner < 2; ++owner) {
+        // 增伤只从"攻击方"的槽位读取。管线在 AMP 阶段会先后走攻击方/防御方两个桶，
+        // 因此回调里用 resolvedDamage.attackerId 判断当前桶 owner 是否为攻击方。
+        // AMP 类别 → **不被** damage_suppress_mask 抑制（官方口径：增伤/减伤都不是"挡伤"，
+        // "使对手挡伤失效"只废归零类，见 DamageEffectCategory）。
+        register_damage_effect(
+            DamagePhase::AMP,
+            owner,
+            DamageEffectCategory::AMP,
+            [](BattleContext* ctx, int bucket_owner) {
+                if (!ctx) {
+                    return;
+                }
+                DamageSnapshot& damage = ctx->resolvedDamage;
+                if (damage.attackerId < 0 || damage.attackerId > 1
+                    || bucket_owner != damage.attackerId) {
+                    return;
+                }
+                if (damage.final <= 0) {
+                    return;
+                }
+                const int pct = ctx->ws.damage_add_pct[bucket_owner];
+                const int flat = ctx->ws.damage_add_flat[bucket_owner];
+                if (pct == 0 && flat == 0) {
+                    return;
+                }
+                damage.addPct += pct;   // 记进快照，供调试/下游读取
+                damage.final = damage.final * (100 + pct) / 100 + flat;
+                if (damage.final < 0) {
+                    damage.final = 0;
+                }
             }
         );
     }
