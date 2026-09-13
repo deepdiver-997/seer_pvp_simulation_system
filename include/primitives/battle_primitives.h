@@ -255,17 +255,32 @@ int transfer_stat_boosts(BattleContext* ctx, int from, int to);
  * 与 clear_stat_boosts（消除提升）互补且独立：反转是"下降翻成提升"，只作用于负等级。
  *
  * @param target 被反转方（通常是施放方自身）
- * @return REVERSED（有下降被翻转为提升）/ NO_DROP（目标本无下降，无反转）/ BLOCKED（禁止反转阻断——预留）
+ * @return REVERSED（有下降被翻转为提升）/ NOTHING（目标本无下降，无反转）/ BLOCKED（禁止反转阻断——预留）
  *
  * ⚠️ TODO（用户约定）：**禁止反转**（令能力下降不被反转的回合类规则）——当前引擎的"回合类查询效果"
  *   若允许命中 target，会令反转失败（返回 BLOCKED）。此处先不做，留作未来按 RuleCenter 查询接入。
  */
 enum class StatReversalResult {
-    REVERSED,
-    NO_DROP,
-    BLOCKED,   // 预留：禁止反转（TODO 未接入）
+    REVERSED,   // 有等级被反转（至少一项）
+    NOTHING,    // 无可反转项（该方向本就没有对应等级）
+    BLOCKED,    // 被挡下（禁止反转 / 免弱免疫）
 };
 StatReversalResult stat_reversal(BattleContext* ctx, int target);
+
+/**
+ * stat_boost_reversal - 反转目标的**能力提升**（正等级 → 等量负等级）。
+ * 官方 effect 143"使对手的能力提升效果反转成能力下降效果" / 743"反转对手能力提升，反转成功…"。
+ *
+ * ⚠️ 与 stat_reversal 是**两个方向、两面免疫**，故拆两个原语：
+ *   - stat_reversal（自身下降→提升）：增益类，不查免疫；
+ *   - stat_boost_reversal（对手提升→下降）：**弱化类**（把等级往下压）→
+ *     **第一件事查 `ImmunityType::STAT_DROP`（免弱）**，免疫则 BLOCKED、等级一点不动。
+ *   不查 STAT_CLEAR（强化保护）：那个护的是"已有提升被消除/吸取"，反转是把它压成下降，
+ *   与弱化同一原理，可穿（用户 2026-09-13 定）。
+ *
+ * @return REVERSED / NOTHING（目标本无提升）/ BLOCKED（免弱免疫）
+ */
+StatReversalResult stat_boost_reversal(BattleContext* ctx, int target);
 
 /**
  * grant_guaranteed_first - 授予"下一回合必定先出手"（必先，分等级）。

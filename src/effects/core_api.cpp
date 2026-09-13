@@ -16,6 +16,7 @@ const CoreApi& core_api() {
         /*stat_drop=*/&stat_drop,
         /*seal_skill=*/&seal_skill,
         /*stat_reversal=*/&stat_reversal,
+        /*stat_boost_reversal=*/&stat_boost_reversal,
         /*fixed_damage=*/&fixed_damage,
     };
     return api;

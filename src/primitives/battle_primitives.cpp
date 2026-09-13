@@ -492,7 +492,7 @@ StatDropResult stat_drop(BattleContext* ctx, int target, int stat, int amount) {
 // 与 clear_stat_boosts（消除提升）独立——"反转"不等于"消除"。
 StatReversalResult stat_reversal(BattleContext* ctx, int target) {
     if (!ctx || target < 0 || target > 1) {
-        return StatReversalResult::NO_DROP;
+        return StatReversalResult::NOTHING;
     }
     // TODO（禁止反转，用户约定）：若 target 身上存在"禁止反转下降"的回合类规则
     //   （RuleCenter 回合类查询效果命中），应返回 BLOCKED 使反转失败。当前未接入，留作未来查询。
@@ -505,7 +505,29 @@ StatReversalResult stat_reversal(BattleContext* ctx, int target) {
             any_reversed = true;
         }
     }
-    return any_reversed ? StatReversalResult::REVERSED : StatReversalResult::NO_DROP;
+    return any_reversed ? StatReversalResult::REVERSED : StatReversalResult::NOTHING;
+}
+
+// 反转目标的**能力提升**（正 → 等负）：弱化类动作，先查免弱（见头文件）。
+StatReversalResult stat_boost_reversal(BattleContext* ctx, int target) {
+    if (!ctx || target < 0 || target > 1) {
+        return StatReversalResult::NOTHING;
+    }
+    // ① 免弱：**最先查、无条件**（与 stat_drop 同一条规则）——目标有免弱则整次失败。
+    if (ctx->is_immune(target, ImmunityType::STAT_DROP, ctx->currentState)) {
+        return StatReversalResult::BLOCKED;
+    }
+    // ⚠️ 不查 STAT_CLEAR（免消除强化）：反转是"把提升压成下降"，与弱化同理可穿强化保护。
+    ElfPet& pet = ctx->getPet(target);
+    bool any_reversed = false;
+    for (int i = 0; i < 6; ++i) {
+        if (pet.levels[i] > 0) {   // 只反提升（正等级）
+            pet.levels[i] = -pet.levels[i];   // 提升 → 下降（等量）
+            ctx->ws.view_levels[target][i] = pet.levels[i];
+            any_reversed = true;
+        }
+    }
+    return any_reversed ? StatReversalResult::REVERSED : StatReversalResult::NOTHING;
 }
 
 namespace {

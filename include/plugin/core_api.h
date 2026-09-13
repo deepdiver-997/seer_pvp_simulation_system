@@ -48,6 +48,9 @@ struct CoreApi {
                        int source_slot, EffectScope scope, bool hit_invalid);
     // 反转目标自身能力下降（负等级→提升）。区别于 clear_stat_boosts（消除提升）。
     StatReversalResult (*stat_reversal)(BattleContext*, int target);
+    // 反转目标的**能力提升**（正→等负，"反转对手能力提升"）。弱化类动作 →
+    // 先查免弱 STAT_DROP（免疫返回 BLOCKED）。与上面那个方向相反、免疫面不同。
+    StatReversalResult (*stat_boost_reversal)(BattleContext*, int target);
     // 固定伤害（吃护盾/事件，复用 deal_damage）。返回"发生了什么"。
     FixedDamageResult (*fixed_damage)(BattleContext*, int target, int amount);
 };
