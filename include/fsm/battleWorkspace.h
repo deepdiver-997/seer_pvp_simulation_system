@@ -218,7 +218,10 @@ struct BattleWorkspace {
                 // no need for default since level range is already checked
             }
         }
-        return static_cast<int>(battle_attrs[owner][i] * (2.0 / (2 + level[index])));
+        // 负等级：官方 2/(2-|level|)，展开即 2/(2-level)。
+        // ⚠️ 原写法是 2/(2+level)：-1 会算成 ×2（应当 ×0.67，方向还反了），
+        //    **-2 直接除零** → int 溢出成 INT_MAX（红伤一击 5 亿，见场景 032 踩坑记录）。
+        return static_cast<int>(battle_attrs[owner][i] * (2.0 / (2 - level[index])));
     }
 };
 
