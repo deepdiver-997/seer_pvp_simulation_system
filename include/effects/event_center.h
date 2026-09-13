@@ -269,8 +269,14 @@ private:
             //    watcher 引用悬垂，不能再读其成员。"回调内自删"是"下一只/下一次"类
             //    监控的推荐写法（once=true 无法做"过滤后才算触发"）。
             const bool once = watcher.once;
-            if (watcher.fn) {
-                watcher.fn(ctx, event);
+            // ⚠️⚠️ **必须拷贝 fn 再调**：回调内自删会 erase 掉 watchers_ 里的条目，
+            //    那个 std::function（连同它的**闭包存储**）当场被析构——而它正在执行。
+            //    之后回调里再读任何捕获变量都是在读**已释放内存**（表现为捕获值与注册时
+            //    不一致、行为随机）。拷贝一份再调，闭包就有了独立存储，自删才真的安全。
+            //    （2026-09-14 踩到：effect 2006 的"盔生效→对手全属性+1"里 self/opp 读成垃圾。）
+            std::function<void(BattleContext*, const BattleEvent&)> fn = watcher.fn;
+            if (fn) {
+                fn(ctx, event);
             }
             if (once) {
                 remove_watcher(wid);

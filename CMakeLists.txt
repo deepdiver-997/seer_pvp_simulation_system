@@ -115,12 +115,26 @@ set_target_properties(soul_plugin PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins/soul_lib"
 )
 
-add_custom_command(TARGET moves_plugin POST_BUILD
+# ⚠️ 把插件部署到源码目录 —— **必须是 ALL 自定义 target，不能用 POST_BUILD**。
+#
+# 运行时加载的是 `resources/<lib>/liblib_1.dylib`（`PetFactory::initialize_runtime_data`
+# 里 `EffectFactory::getInstance("resources/moves_lib")`），而构建产物落在
+# `build/plugins/<lib>/`。POST_BUILD 只在**该 target 重新链接**时才跑：
+# 一旦 make 认为 .o 是最新的（改了头但 .cpp 没变、或源码与 .o 的 mtime 落在同一秒），
+# 就不链接 → **不拷贝** → `resources/` 里那份停在旧版，**运行时加载旧代码**。
+# 症状极具误导性：源码是对的、`build/plugins/` 下的是新的，唯独生效的是旧的；
+# 更坏的情况是插件与 core 头不一致（字段偏移错位）→ 写进错误的字段、行为随机。
+# 无输出的自定义 target **每次构建都执行**，所以部署永远跟得上。
+add_custom_target(moves_plugin_deploy ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/resources/moves_lib"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:moves_plugin>" "${CMAKE_CURRENT_SOURCE_DIR}/resources/moves_lib/"
+    DEPENDS moves_plugin
+    COMMENT "部署 moves_plugin → resources/moves_lib/liblib_1.dylib"
 )
 
-add_custom_command(TARGET soul_plugin POST_BUILD
+add_custom_target(soul_plugin_deploy ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/resources/soul_lib"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:soul_plugin>" "${CMAKE_CURRENT_SOURCE_DIR}/resources/soul_lib/"
+    DEPENDS soul_plugin
+    COMMENT "部署 soul_plugin → resources/soul_lib/liblib_1.dylib"
 )
