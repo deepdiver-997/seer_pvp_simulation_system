@@ -76,8 +76,7 @@ if(BUILD_SMOKE_TEST)
     target_link_libraries(sim_smoke_test PRIVATE sim_core)
 
     # 场景化对战测试：GLOB 自动发现 test/scenario/scenario_*.cpp，每个文件一个独立二进制。
-    # 命名约定：scenario_<三位序号>_<特性后缀>.cpp（如 scenario_023_selfdestruct_legacy.cpp）。
-    # 新增场景只需放一个文件 + 在 docs/07-工具与测试/场景测试说明.md 登记，无需改 CMake。
+    # 测试用例为本地维护（不入库），公开检出时此 GLOB 为空、不生成目标，不影响其余构建。
     file(GLOB SCENARIO_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/test/scenario/scenario_*.cpp)
     list(SORT SCENARIO_SOURCES)
