@@ -94,12 +94,13 @@ struct BattleWorkspace {
     float dodge_rate[2];           // 闪避率
     float hit_rate_mod[2];         // 命中率修正倍率
     float crit_rate_mod[2];        // 暴击率修正（乘算；效果"下N回合暴击率提升"每回合写它）
-    // 本次技能使用**是否暴击**——在 `query_usage`（miss 之后、门判定之前）掷一次并写入，
-    // `stage_simple_attack_damage` 只消费不重掷。为什么必须前移：判定位要在"技能无效"之前，
-    // 而伤害结算在技能无效时**根本不会执行**（handle_*_AttackDamage 因 allowAttackDamagePipeline
-    // 为 false 早退）——只有 miss 会阻止暴击，打在盔上照样暴击并破防（用户 2026-09-13 口径）。
-    // 一次技能使用掷一次（多段/变威力共用同一结果）；ws 每回合 reset 自动清。
-    bool crit_happened[2];
+    // 本回合效果授予的"必中"凭证（如 2000「对手处于能力提升则先制+1**且必中**」这类
+    // **条件必中固有效果**）：效果体在 MOVE_RIGHT 时点置位（与条件先制同一个效果体），
+    // `materialize_attack_credential` 再把它并进 `AttackCredential::must_hit`。
+    // ⚠️ 为什么必须走 ws 而不是直接改 `skill.must_hit`：改技能对象是**永久**的
+    //    （那场仗之后该技能永远必中）；而写在 on_selected 又会被 ROUND_START 的 ws reset 冲掉
+    //    —— MOVE_RIGHT 是"reset 之后、出手之前"的唯一正确窗口。
+    bool must_hit_grant[2];
     float damage_add_pct[2];       // 伤害加成百分比
     int   damage_add_flat[2];      // 伤害加成固定值
     numerical_properties battle_attrs[2];        // 本回合视角的数值属性，受到效果修正但不改变真实属性
@@ -133,6 +134,13 @@ struct BattleWorkspace {
         bool ignore_attack_immunity = false; // 穿"攻击免疫/狮盔"（官方 699）
         bool ignore_damage_limit = false;    // 穿"伤害限制"（官方 697，本轮只存不消费）
         bool force_execute = false;          // 强制执行：必定命中 + 无视命中效果失效（官方 2380/2474/魂印2260）
+        // 本次技能**必定命中**（合成自三处，见 materialize_attack_credential）：
+        //   ① `skill.must_hit`（官方 moves.must_hit 固有必中）；
+        //   ② `ws.must_hit_grant[owner]`（**条件必中固有效果**本回合授予，如 effect 2000）；
+        //   ③ `force_execute`（强制执行隐含必定命中）。
+        // ⚠️ 判"是否必中"一律读这个凭证，**不要**只读 skill 里写死的字段——
+        //    条件必中类效果是靠 ② 在出手前授予的（用户 2026-09-13 口径）。
+        bool must_hit = false;
         int  level = 0;                      // 穿透等级：0=无, 1=可穿盔（等级比较留 SkillInvalidCenter）
     };
     AttackCredential attack_credential[2];   // 按攻击方索引
@@ -171,9 +179,16 @@ struct BattleWorkspace {
     // 克制（>1）保持克制（区别于硬设 restraint_view=1 会连克制也削）。伤害公式在 restraint 算好后判断。
     bool no_weakness[2]{};
 
-    //========== 命中效果失效标记（③层，白板模式） ==========
-    // execute 判定③层 kFullNull 时置位；ATTACK_DAMAGE 阶段据此把伤害归 0（白板）。
-    // 每回合 reset 自动清；kEffectsOnly（保留伤害）不置位。
+    //========== 命中效果失效标记（③层） ==========
+    // 消费点已收口到 `Skills::query_usage` ②.5（按技能类型分别消费 RuleCenter 的两类条目），
+    // 结果模式记在这里供执行期读：
+    //   - `hit_invalid_mode`：本次失效的模式（HitInvalidMode；-1 = 无失效）。
+    //     execute 据此置 `hit_invalid_zero_damage`。
+    //   - `hit_invalid_zero_damage`：白板模式（kFullNull）→ ATTACK_DAMAGE 阶段把伤害归 0。
+    //     kEffectsOnly（保留伤害）不置位。
+    // 每回合 reset 自动清。
+    int  hit_invalid_mode[2]{};        // 默认 0 = kEffectsOnly；只在失效时被写
+    bool hit_invalid_detected[2]{};    // 本次是否发生 ③层失效（区分"模式=0"与"没失效"）
     bool hit_invalid_zero_damage[2]{};
 
     //========== 缓存计算值 ==========

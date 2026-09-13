@@ -59,9 +59,23 @@ enum class ImmunityType {
 enum class RuleCategory {
     IMMUNE,      // 免疫(纯查询不消费)：subtype=ImmunityType + coverage/mask/soul。**天然不可被断**（source_valid_id 恒 0，只随上下场清）
     SEAL,        // 盔/威/封属/命中失效(响应即消费)：subtype=SealKind。随来源效果被断作废
-    HIT_INVALID, // ③层命中效果失效(防御方按次生效)：subtype=HitInvalidMode
+    // ③层命中效果失效(防御方按次生效)：subtype=HitInvalidMode。
+    // ⚠️ **按技能类型拆成两个类别**（用户 2026-09-13 口径）：命中失效**不是属性技能专用**，
+    //    攻击技能同样会被失效。拆开就没有"这条到底管哪种技能"的歧义；
+    //    **要两种都失效就注册两条**（不是给一条加 mask）。
+    HIT_INVALID_ATTACK,    // 只对**攻击技能**生效
+    HIT_INVALID_ATTRIBUTE, // 只对**属性技能**生效
     REFLECT,     // 回弹：target 免疫异常时反弹给施放方(apply_anomaly 反射)。支持 counts/rounds/source 锚
 };
+
+// ③层命中失效类别 ↔ 技能类型的对应（is_attribute_skill = 本次用的是属性技能）。
+inline RuleCategory hit_invalid_category_for(bool is_attribute_skill) {
+    return is_attribute_skill ? RuleCategory::HIT_INVALID_ATTRIBUTE
+                              : RuleCategory::HIT_INVALID_ATTACK;
+}
+inline bool is_hit_invalid_category(RuleCategory c) {
+    return c == RuleCategory::HIT_INVALID_ATTACK || c == RuleCategory::HIT_INVALID_ATTRIBUTE;
+}
 
 // 封属类别(subtype for SEAL)。含"命中失效"变体(SEAL_ATTRIBUTE_HIT：属性技能照常命中、
 // 效果失效、不触发 SKILL_INVALID 无效补偿，区别于普通封属)——用户定的非补偿语义。
@@ -279,14 +293,19 @@ public:
         recount();
     }
 
+    // 挂 ③层命中效果失效。**按技能类型分成两类**（攻击/属性）——要两种技能都失效就调两次
+    // （或两次传不同 is_attribute_skill），不是给一条加 mask。
+    // @param is_attribute_skill true=只对属性技能生效；false=只对攻击技能生效
     void grant_hit_invalid(int target, int source_slot, int source_effect_id, int mode,
-                           int count, EffectScope scope = EffectScope::ON_STAGE,
+                           int count, bool is_attribute_skill,
+                           EffectScope scope = EffectScope::ON_STAGE,
                            int source_valid_id = 0) {
         if (target < 0 || target > 1 || count <= 0) {
             return;
         }
+        const RuleCategory category = hit_invalid_category_for(is_attribute_skill);
         for (RuleTicket& t : all_) {
-            if (t.category == RuleCategory::HIT_INVALID
+            if (t.category == category
                 && t.source_owner == target && t.source_effect_id == source_effect_id
                 && t.subtype == mode) {
                 t.source_slot = source_slot;
@@ -302,7 +321,7 @@ public:
         t.source_effect_id = source_effect_id;
         t.scope = scope;
         t.target = target;
-        t.category = RuleCategory::HIT_INVALID;
+        t.category = category;
         t.subtype = mode;
         t.remaining_counts = count;
         t.source_valid_id = source_valid_id;
@@ -444,13 +463,16 @@ public:
         recount();
     }
 
-    std::optional<int> consume_hit_invalid(int defender) {
+    // 消费一次 ③层命中效果失效。**只消费与本次技能类型匹配的那一类**
+    // （攻击技能 → HIT_INVALID_ATTACK；属性技能 → HIT_INVALID_ATTRIBUTE）。
+    std::optional<int> consume_hit_invalid(int defender, bool is_attribute_skill) {
         if (defender < 0 || defender > 1) {
             return std::nullopt;
         }
+        const RuleCategory category = hit_invalid_category_for(is_attribute_skill);
         for (auto it = all_.begin(); it != all_.end(); ++it) {
             RuleTicket& t = *it;
-            if (t.category != RuleCategory::HIT_INVALID || t.target != defender) {
+            if (t.category != category || t.target != defender) {
                 continue;
             }
             if (t.remaining_counts > 0) {
@@ -516,13 +538,21 @@ public:
     }
 
     bool empty() const { return all_.empty(); }
-    // ③层命中失效在 target 侧剩余次数和（0 = 已消费/无）。抛只读测试/审计用。
-    int hit_invalid_remaining(int target) const {
+    // ③层命中失效在 target 侧剩余次数和（0 = 已消费/无）。只读测试/审计用。
+    // skill_kind < 0 = 两类都算（总数）；0 = 只看攻击类；1 = 只看属性类。
+    int hit_invalid_remaining(int target, int skill_kind = -1) const {
         int sum = 0;
         for (const RuleTicket& t : all_) {
-            if (t.category == RuleCategory::HIT_INVALID && t.target == target) {
-                sum += t.remaining_counts;
+            if (!is_hit_invalid_category(t.category) || t.target != target) {
+                continue;
             }
+            if (skill_kind == 0 && t.category != RuleCategory::HIT_INVALID_ATTACK) {
+                continue;
+            }
+            if (skill_kind == 1 && t.category != RuleCategory::HIT_INVALID_ATTRIBUTE) {
+                continue;
+            }
+            sum += t.remaining_counts;
         }
         return sum;
     }

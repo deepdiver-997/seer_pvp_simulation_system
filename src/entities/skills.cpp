@@ -140,6 +140,12 @@ void materialize_attack_credential(BattleContext* ctx, int owner, const Skills& 
     if (ctx->force_execute_on_pp0[owner] && skill.pp == 0) {
         cred.force_execute = true;
     }
+    // 必定命中（三合一）。判"是否必中"一律读这个凭证，不要只读 skill 里写死的字段——
+    // 条件必中固有效果（如 2000「对手处于能力提升则先制+1且必中」）是靠 ② 在**出手前**
+    // 授予的（效果体在 MOVE_RIGHT 时点写 ws.must_hit_grant）。
+    cred.must_hit = skill.must_hit                  // ① 官方 moves.must_hit 固有必中
+                 || ctx->ws.must_hit_grant[owner]   // ② 本回合效果授予的条件必中
+                 || cred.force_execute;             // ③ 强制执行隐含必定命中
     cred.valid = cred.ignore_attack_immunity || cred.ignore_damage_limit || cred.force_execute;
 }
 
@@ -194,12 +200,10 @@ bool Skills::loadSkills() {
     maxPP = record->max_pp;
     pp = record->max_pp;
     // 暴击率（官方 moves.crit_rate，用户 2026-09-13 定口径）：**分母 16 的分子**——
-    // crit_rate=8 → 50%、=16 → 100%；**0 = 走基础暴击率 1/16**（不是"不会暴击"）。
+    // crit_rate=8 → 8/16 = 50%、=16 → 100%；**`0` = 0/16 = 永不必暴**
+    // （不是"基础 1/16"——确实有天生暴击率为 0 的技能，没有别的引爆效果就永远不会暴击）。
     // 本字段存**百分比**（与 ws.crit_rate_mod 的乘算口径一致，效果可直接改 mod 缩放它）。
-    {
-        const int sixteenths = record->crit_rate > 0 ? record->crit_rate : 1;
-        critical_strike_rate = static_cast<float>(sixteenths) * 100.0f / 16.0f;
-    }
+    critical_strike_rate = static_cast<float>(record->crit_rate) * 100.0f / 16.0f;
     element[0] = record->type_id;
     element[1] = 0;
     rawEffectRecords = record->effects;
@@ -406,37 +410,58 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
         return SkillUsageResult::MISS;
     }
 
-    // 0) 物化本次请求凭证（穿透 697/699 + 次数授予 + 强制执行），供 ①miss 与 ②门判定读。
+    // 0) 物化本次请求凭证（穿透 697/699 + 次数授予 + 强制执行 + **必中**），供 ①miss 与 ②门判定读。
     materialize_attack_credential(ctx, owner, *this);
-    ctx->ws.crit_happened[owner] = false;   // 每次技能使用先清，miss 时不残留
+    const BattleWorkspace::AttackCredential& cred = ctx->ws.attack_credential[owner];
+    const bool is_attribute = (type == SkillType::Attribute);
+    ctx->crit_happened[owner] = false;   // 每次技能使用先清，miss 时不残留
 
-    // ① 命中判定（优先级最高）：强制执行隐含必定命中 → 跳过 miss 计算。
-    if (!must_hit && !ctx->ws.attack_credential[owner].force_execute) {
-        const int accuracy = this->accuracy;
-        const float dodge_chance = ctx->ws.dodge_rate[1 - owner];
-        const int hit_chance = accuracy - static_cast<int>(dodge_chance * 100);
-        if ((std::rand() % 100) >= hit_chance) {
-            // miss 也照常 notify 中心：文档 §2.3「一旦本次技能命中失败（miss 类），
-            // 会消耗所有可响应的次数类效果」——狮盔会被响应并消耗，尽管技能是 miss 的。
-            ctx->rule_center_.notify(
-                ctx, owner, type == SkillType::Attribute, this->power,
-                ctx->ws.attack_credential[owner].ignore_attack_immunity);
-            return SkillUsageResult::MISS;
+    // ① 命中判定（优先级最高）。三个分支，**顺序不可换**：
+    //   (a) 强制执行：隐含必定命中 → 跳过一切命中判定（含失明）。
+    //   (b) 失明（异常 20）：**非必中技能必定 miss**；**必中技能 50% 正常命中 / 50% 命中效果失效**。
+    //   (c) 常规命中率 roll。
+    // "是否必中"一律读**凭证** `cred.must_hit`（技能固有 moves.must_hit ∨ 本回合条件必中授予
+    // ∨ 强制执行），不要只读 `this->must_hit`——条件必中固有效果是出手前授予的。
+    bool blind_hit_invalid = false;   // 失明掷出的"命中效果失效"档（照常继续走 ② 门判定）
+    if (!cred.force_execute) {
+        if (ctx->has_active_abnormal_status(owner, static_cast<int>(AbnormalStatusId::Blind))) {
+            // 失明：见 abnormal-types.h AbnormalStatusId::Blind。
+            if (cred.must_hit) {
+                // 必中技能：50% 正常命中 / 50% 命中效果失效（官方口径，用户 2026-09-13 确认）。
+                blind_hit_invalid = (std::rand() % 2) != 0;
+            } else {
+                // 非必中技能：必定 miss。走到这里就是 miss（不再掷命中率）。
+                ctx->rule_center_.notify(ctx, owner, is_attribute, this->power,
+                                         cred.ignore_attack_immunity);
+                return SkillUsageResult::MISS;
+            }
+        } else if (!cred.must_hit) {
+            const int accuracy = this->accuracy;
+            const float dodge_chance = ctx->ws.dodge_rate[1 - owner];
+            const int hit_chance = accuracy - static_cast<int>(dodge_chance * 100);
+            if ((std::rand() % 100) >= hit_chance) {
+                // miss 也照常 notify 中心：文档 §2.3「一旦本次技能命中失败（miss 类），
+                // 会消耗所有可响应的次数类效果」——狮盔会被响应并消耗，尽管技能是 miss 的。
+                ctx->rule_center_.notify(ctx, owner, is_attribute, this->power,
+                                         cred.ignore_attack_immunity);
+                return SkillUsageResult::MISS;
+            }
         }
     }
 
     // ①.5 暴击判定（用户 2026-09-13 口径）——**判定位在 miss 之后、门判定之前**：
-    //   · 只有 **miss** 会阻止暴击（miss 已在上面 return，这里掷不到）；
+    //   · 只有 **miss** 会阻止暴击（miss 已在上面 return，这里掷不到）；失明的 50% 档不算 miss，
+    //     它照样保留暴击结果；
     //   · 技能无效（盔/威/封属）、命中效果失效**都保留**暴击结果——"打在盔上一样可以触发
     //     暴击并且破对应的防御正等级"；
     //   · **只在使用攻击技能时触发**（属性技能不掷）。
     // 为什么必须在这里掷而不是在伤害结算处：技能无效时伤害结算**整段不执行**
     // （handle_*_AttackDamage 因 allowAttackDamagePipeline=false 早退），在那儿掷就永远掷不到。
-    // 一次技能使用掷一次（多段/变威力共用结果）。暴击率 = 技能暴击率 × ws.crit_rate_mod。
-    if (type != SkillType::Attribute) {
+    // 一次技能使用掷一次（多段/变威力共用结果）。暴击率 = 技能暴击率 × ws.crit_rate_mod；
+    // crit_rate=0 的技能**永不必暴**（没有引爆效果就不会暴击）。
+    if (!is_attribute) {
         const float rate = critical_strike_rate * ctx->ws.crit_rate_mod[owner];
-        // 万分位掷（6.25% 基础率 = 625/10000，精确）；≥100% 必暴。
-        ctx->ws.crit_happened[owner] =
+        ctx->crit_happened[owner] =
             rate >= 100.0f || (rate > 0.0f && (std::rand() % 10000) < static_cast<int>(rate * 100.0f));
     }
 
@@ -445,21 +470,41 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
     // （无效类与命中失效类在同一次遍历中统一消费），不因某个盔挡了另一个就保留次数。
     // 回合类条目响应但不消耗（靠减扣点/断回合结束）。
     // 穿透只绕"可穿盔"：条件盔/龙威（penetrable=false）即使有凭证也照旧被挡。
-    // 注：miss 分支已在 ① 提前 return —— 但那里**也要** notify（miss 同样消费可响应的次数类），
-    //     见下方 ① 的改动。miss 时该处返回被丢弃（走 MISS，不看命中失效）。
-    const bool is_attribute = (type == SkillType::Attribute);
+    // ⚠️ 这里的 HIT_INVALID 来自 `SealKind::SEAL_ATTRIBUTE_HIT`（**封属·命中失效**），
+    //    它**天生只响应属性技能**（781 秩序之助原文："令对手使用的**属性技能**无效"），
+    //    与 ③层"命中效果失效"（下面 ②.5）**不是同一件事**——后者攻击/属性技能都可能。
     const SkillInvalidNotifyResult nr = ctx->rule_center_.notify(
-        ctx, owner, is_attribute, this->power,
-        ctx->ws.attack_credential[owner].ignore_attack_immunity);
-    switch (nr) {
-        case SkillInvalidNotifyResult::INVALID:
-            return SkillUsageResult::SEALED;      // 被无效（盔/威/封属）→ SKILL_INVALID + 补偿
-        case SkillInvalidNotifyResult::HIT_INVALID:
-            return SkillUsageResult::HIT_INVALID; // 命中失效（只封属性技能）→ 效果失效、无补偿
-        case SkillInvalidNotifyResult::NONE:
-        default:
-            return SkillUsageResult::OK;
+        ctx, owner, is_attribute, this->power, cred.ignore_attack_immunity);
+    if (nr == SkillInvalidNotifyResult::INVALID) {
+        return SkillUsageResult::SEALED;      // 被无效（盔/威/封属）→ SKILL_INVALID + 补偿
     }
+    if (nr == SkillInvalidNotifyResult::HIT_INVALID) {
+        return SkillUsageResult::HIT_INVALID; // 封属·命中失效 → 效果失效、无补偿
+    }
+
+    // ②.5 ③层"命中效果失效"（防御方按次挂载）：**按技能类型分别消费**。
+    // ⚠️ 用户 2026-09-13 口径：命中失效**不是属性技能专用**，攻击技能同样会被失效，
+    //    所以 RuleCenter 里拆成两个类别（HIT_INVALID_ATTACK / HIT_INVALID_ATTRIBUTE），
+    //    本次是攻击技能就消费攻击那条、属性技能就消费属性那条；要"两种都失效"就注册两条。
+    //    消费点收口在本函数末尾（而不是 execute 里各判一次），与 miss/sealed 同一处出结果。
+    //    强制执行由 `cred.force_execute` 绕过（在 is_hit_effect_invalid 里判）。
+    if (!cred.force_execute) {
+        const std::optional<int> mode = ctx->rule_center_.consume_hit_invalid(1 - owner, is_attribute);
+        if (mode.has_value()) {
+            ctx->ws.hit_invalid_detected[owner] = true;
+            ctx->ws.hit_invalid_mode[owner] = *mode;   // 供伤害路径判 kFullNull（白板归零）
+            return SkillUsageResult::HIT_INVALID;
+        }
+    }
+
+    // 失明的 50% 档：命中效果失效（无挂载条目可消费，纯异常效果）。
+    if (blind_hit_invalid) {
+        ctx->ws.hit_invalid_detected[owner] = true;
+        ctx->ws.hit_invalid_mode[owner] = static_cast<int>(HitInvalidMode::kEffectsOnly);
+        return SkillUsageResult::HIT_INVALID;
+    }
+
+    return SkillUsageResult::OK;
 }
 
 void Skills::register_usability_effect(int effectId, SkillUsabilityEffectType type, bool active) {
@@ -508,7 +553,7 @@ void Skills::add_effect_node(SkillExecResult result, SkillEffectNode node) {
 // ContinuousEffect:: 的实现是 0 个（全在头文件内联），实际装的全是 Skills:: 的方法。
 // 文件名与内容无关，故整体搬入本文件（skills.cpp），使 Skills 的实现集中一处；
 // continuousEffect.cpp 随之删除。
-// 内容：Skills::execute（执行期主流程）/ is_hit_effect_invalid（③层）/
+// 内容：Skills::execute（执行期主流程）/ query_usage（命中+门判定+③层消费）/
 //       register_branch（分支注册 + 逐节点 nullify 过滤）
 // ================================================================
 
@@ -607,30 +652,28 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
         register_branch(ctx, owner, SkillExecResult::SKILL_INVALID, flags);
         return {SkillExecResult::SKILL_INVALID, flags};
     }
-    // 命中失效（SEAL_ATTRIBUTE_HIT）：技能照常命中，但效果不被注册、不触发 SKILL_INVALID 补偿。
-    // 只由 SkillInvalidCenter 的门判定引起（仅封属性技能）；与下方 ③层 走同一 hit-invalid 执行路径
-    // （逐节点 nullify 过滤 + EVENT_HIT）。这里 **不 emit EVENT_SKILL_INVALID**、不注册无效补偿分支。
-    if (usage == SkillUsageResult::HIT_INVALID) {
-        const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::HIT);
-        register_branch(ctx, owner, SkillExecResult::HIT, flags, /*filter_hit_invalid=*/true);
-        ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner, ctx->opponent(owner)});
-        return {SkillExecResult::HIT, flags};
-    }
-
     // 成功使用攻击技能 → 统一消费次数型穿透授予（"下一次攻击"语义：即使对手无阻挡也消费）。
     // miss/sealed 已在上方提前 return 不消费；属性技能无攻击语义不消费。
-    // EFFECT_INVALID（命中效果失效）也算成功使用 → 也消费。
+    // 落在**命中失效分支之前**：③层失效（下面那条 HIT_INVALID）也算"成功使用"→ 也消费
+    // （原先 ③层 在更靠后的位置处理，消费顺序就是这样的）。
+    // ② 门判定那条 HIT_INVALID（SEAL_ATTRIBUTE_HIT）只对**属性技能**响应，这里 `type != Attribute`
+    // 天然为假 → 行为与改动前一致（它从来不消费）。
     if (type != SkillType::Attribute) {
         ctx->consume_penetration_grants_after_attack(owner);
         ctx->consume_attack_boost_grants_after_attack(owner);  // 次数型攻击增伤同步消费（"下1次攻击"语义）
     }
 
-    // 命中效果失效③层：效果选择性注册（逐节点 nullify 过滤），伤害按模式处理。
-    // ③层绝不注册 SKILL_INVALID 补偿分支；强制执行由 is_hit_effect_invalid 返回 nullopt 绕过。
-    const std::optional<HitInvalidMode> invalid_mode = is_hit_effect_invalid(ctx, owner);
-    if (invalid_mode.has_value()) {
-        if (*invalid_mode == HitInvalidMode::kFullNull) {
-            ctx->ws.hit_invalid_zero_damage[owner] = true;  // 白板：命中效果失效 + 伤害归0
+    // 命中失效：技能照常命中，但效果不被注册、不触发 SKILL_INVALID 补偿。两个来源合流到这条：
+    //   ① ② 门判定的 `SEAL_ATTRIBUTE_HIT`（封属·命中失效，**只可能是属性技能**）；
+    //   ② ③层"命中效果失效"（防御方按次挂载，攻击/属性都可能）与失明的 50% 档
+    //      —— 由 `query_usage` ②.5 消费后返回（`ws.hit_invalid_detected` 置位）。
+    // 两者都走同一执行路径（逐节点 nullify 过滤 + EVENT_HIT），
+    // **不 emit EVENT_SKILL_INVALID**、不注册无效补偿分支。
+    if (usage == SkillUsageResult::HIT_INVALID) {
+        // ③层白板模式（kFullNull）：命中效果失效 + 伤害归 0（ATTACK_DAMAGE 阶段读该标记）。
+        if (ctx->ws.hit_invalid_detected[owner]
+            && static_cast<HitInvalidMode>(ctx->ws.hit_invalid_mode[owner]) == HitInvalidMode::kFullNull) {
+            ctx->ws.hit_invalid_zero_damage[owner] = true;
         }
         const SkillResolutionFlags flags = resolution_flags_for(SkillExecResult::HIT);
         register_branch(ctx, owner, SkillExecResult::HIT, flags, /*filter_hit_invalid=*/true);
@@ -645,21 +688,6 @@ std::pair<SkillExecResult, SkillResolutionFlags> Skills::execute(BattleContext* 
     ctx->event_center_.emit(BattleEvent{EventType::EVENT_HIT, owner, ctx->opponent(owner)});
 
     return {SkillExecResult::HIT, flags};
-}
-
-std::optional<HitInvalidMode> Skills::is_hit_effect_invalid(BattleContext* ctx, int owner) const {
-    // 强制执行：无视命中效果失效 → 无失效（凭证已在 query_usage 0) 步物化）。
-    if (ctx && owner >= 0 && owner <= 1 && ctx->ws.attack_credential[owner].force_execute) {
-        return std::nullopt;
-    }
-    // ③层触发源：防御方（1-owner）挂了命中效果失效 → 消费一次并返回模式（RuleCenter HIT_INVALID）。
-    if (ctx && owner >= 0 && owner <= 1) {
-        const std::optional<int> mode = ctx->rule_center_.consume_hit_invalid(/*defender=*/1 - owner);
-        if (mode.has_value()) {
-            return static_cast<HitInvalidMode>(*mode);
-        }
-    }
-    return std::nullopt;
 }
 
 void Skills::register_branch(BattleContext* ctx, int owner, SkillExecResult result,

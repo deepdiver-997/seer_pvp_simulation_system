@@ -353,12 +353,12 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
             snapshot.base = snapshot.base * (100 + boost_sum) / 100;
         }
     }
-    // 暴击：**只消费** query_usage 已掷好的结果（`ws.crit_happened`），这里不再重掷。
+    // 暴击：**只消费** query_usage 已掷好的结果（`ctx->crit_happened`），这里不再重掷。
     // 判定位必须在"技能无效"之前（只有 miss 能阻止暴击），而本函数在技能无效时根本不会
     // 被执行——所以掷点搬到了 query_usage 的 ①.5 步。
     // 按暴击倍率放大 base（在减伤管线之前）。暴击抗性削减"加成"部分
     // （如 2 倍暴击 + 50% 暴击抗性 → 1.5 倍）。
-    if (ctx->ws.crit_happened[attacker_id]) {
+    if (ctx->crit_happened[attacker_id]) {
         const int crit_mult = ctx->ws.cached_crit_damage[attacker_id];  // 默认 200（2 倍）
         const int bonus = crit_mult - 100;
         // 读 ws 有效视图（临时 buff 可修改暴击抗性）；基线由 sync_damage_resist_view 重基。
@@ -392,7 +392,7 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
 // 等级"），早退出口在清快照之后（打盔/技能无效照样破防）。
 // 系别用**执行用技能**（技能替换后以替换技能为准），与伤害公式同源。
 void apply_crit_defense_break(BattleContext* ctx, int attacker_id) {
-    if (!ctx || attacker_id < 0 || attacker_id > 1 || !ctx->ws.crit_happened[attacker_id]) {
+    if (!ctx || attacker_id < 0 || attacker_id > 1 || !ctx->crit_happened[attacker_id]) {
         return;
     }
     const Skills* executing = resolve_executing_skill(ctx, attacker_id);

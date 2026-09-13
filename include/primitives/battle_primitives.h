@@ -155,13 +155,20 @@ void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool 
  *   - kFullNull：白板（效果失效 + 伤害归 0）
  * 强制执行（force_execute）可绕过③层。
  *
- * @param target     被失效方 (0/1)
- * @param mode       失效模式（kEffectsOnly / kFullNull）
- * @param count      失效次数（>0）
- * @param source_id  施放方（未知传 -1）
+ * ⚠️ **按技能类型分两类**（用户 2026-09-13 口径）：命中失效**不是属性技能专用**，
+ *   攻击技能同样会被失效 → RuleCenter 里拆成 `HIT_INVALID_ATTACK` / `HIT_INVALID_ATTRIBUTE`。
+ *   本次是攻击技能就消费攻击那条、属性技能就消费属性那条。
+ *   **要"两种技能都失效"就调两次**（一次 is_attribute_skill=false、一次 true），
+ *   不是给一条加"通配"。
+ *
+ * @param target             被失效方 (0/1)
+ * @param mode               失效模式（kEffectsOnly / kFullNull）
+ * @param count              失效次数（>0）
+ * @param is_attribute_skill true=只对**属性技能**生效；false=只对**攻击技能**生效
+ * @param source_id          施放方（未知传 -1）
  */
 void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
-                        int count, int source_id = -1);
+                        int count, bool is_attribute_skill, int source_id = -1);
 
 // ----------------------------------------------------------------
 // 能力等级变化

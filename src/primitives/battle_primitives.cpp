@@ -368,14 +368,15 @@ void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool 
 }
 
 void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,
-                        int count, int source_id) {
+                        int count, bool is_attribute_skill, int source_id) {
     if (!ctx || target < 0 || target > 1 || count <= 0) {
         return;
     }
-    // ③层并入 RuleCenter(HIT_INVALID)：target=被失效方(防御方)。source_id 无 effect 语义，此处作
-    // 覆盖键来源占位（同 target+mode 刷新）。
+    // ③层并入 RuleCenter（HIT_INVALID_ATTACK / HIT_INVALID_ATTRIBUTE 两类）：
+    // target=被失效方(防御方)。source_id 无 effect 语义，此处作覆盖键来源占位（同 target+mode 刷新）。
+    // is_attribute_skill 决定挂哪一类——要"两种技能都失效"就调两次本原语。
     ctx->rule_center_.grant_hit_invalid(target, /*source_slot=*/-1, source_id, static_cast<int>(mode),
-                                        count);
+                                        count, is_attribute_skill);
 }
 
 StatChangeResult stat_change(BattleContext* ctx, int target, int stat, int delta) {
