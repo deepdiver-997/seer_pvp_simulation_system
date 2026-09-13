@@ -257,7 +257,9 @@ public:
         return false;
     }
 
-    void grant_seal(int source_owner, int source_slot, int source_effect_id, int target,
+    // 返回**授予句柄**（source_id）——"盔生效/被穿"事件带上它，监听器据此精确匹配自己的那条盔
+    // （同 effect_id 的多条盔靠它区分）。
+    int grant_seal(int source_owner, int source_slot, int source_effect_id, int target,
                     SealKind kind, int counts, int rounds, bool penetrable,
                     EffectScope scope = EffectScope::ON_STAGE,
                     std::function<bool(BattleContext*, int, int)> condition = nullptr,
@@ -266,8 +268,9 @@ public:
         // 允许次数型(counts>0)或回合型(rounds>0)，至少其一（回合型正常 counts=0）。
         if (source_owner < 0 || source_owner > 1 || target < 0 || target > 1
             || (counts <= 0 && rounds <= 0)) {
-            return;
+            return 0;
         }
+        const int sid = ++next_source_id_;   // 每次授予一个新句柄（刷新也换新 → 监听器不会认错盔）
         // 覆盖键 (source_owner, source_effect_id, SEAL, kind) 刷新，不追加。
         for (RuleTicket& t : all_) {
             if (t.category == RuleCategory::SEAL
@@ -282,8 +285,9 @@ public:
                 t.consumed_when_pierced = consumed_when_pierced;
                 t.condition = std::move(condition);
                 t.source_valid_id = source_valid_id;  // 来源效果被断→随断回作废
+                t.source_id = sid;
                 recount();
-                return;
+                return sid;
             }
         }
         RuleTicket t;
@@ -300,8 +304,10 @@ public:
         t.remaining_rounds = rounds;
         t.condition = std::move(condition);
         t.source_valid_id = source_valid_id;
+        t.source_id = sid;
         all_.push_back(std::move(t));
         recount();
+        return sid;
     }
 
     // 挂 ③层命中效果失效。**按技能类型分成两类**（攻击/属性）——要两种技能都失效就调两次
@@ -373,12 +379,13 @@ public:
         return is_immune(target, type, timing_bit, current_round, status_id, /*soul_filter=*/1);
     }
 
-    // on_armor_triggered（可选）：**真正生效**（未被穿透、条件通过）的拦截条目逐条回调，
-    // 参数 = (source_effect_id, source_owner)。用途：带后续子句的盔的"触发成功则…"
-    // （插件按 effect_id 匹配自己的盔挂子句）。⚠️ 被穿的盔**不会**回调 → 子句天然不触发。
+    // on_armor_resolved（可选）：每条**被结算**的拦截条目回调一次
+    // （真正生效 或 被穿），参数 = (source_effect_id, source_owner, grant_id, blocked)。
+    // 用途：带后续子句的盔——插件按 **grant_id** 精确匹配自己那条，无论生效与否都自删监听器
+    // （否则被穿留下的监听器会在**下一次**同类盔生效时多触发一次），blocked=false 时不执行子句。
     SkillInvalidNotifyResult notify(BattleContext* ctx, int user, bool is_attribute_skill,
                                     int power, bool ignore_attack_immunity,
-                                    const std::function<void(int, int)>& on_armor_triggered = nullptr) {
+                                    const std::function<void(int, int, int, bool)>& on_armor_resolved = nullptr) {
         if (user < 0 || user > 1) {
             return SkillInvalidNotifyResult::NONE;
         }
@@ -403,18 +410,27 @@ public:
                 //   带后续子句的盔（2270/2006/1288/1293）被穿**消耗**；
                 //   裸的"免疫下{N}次对手的攻击"（570/2269/2203）被穿**保留**。
                 // 两种都**不算生效** → 不进 on_armor_triggered、不计 any_invalid。
+                const int grant_id = t.source_id;
+                const int effect_id = t.source_effect_id;
+                const int holder = t.source_owner;
                 if (t.consumed_when_pierced && t.remaining_counts > 0) {
                     --t.remaining_counts;
                     if (t.remaining_counts <= 0) {
                         it = all_.erase(it);
+                        if (on_armor_resolved) {
+                            on_armor_resolved(effect_id, holder, grant_id, /*blocked=*/false);
+                        }
                         continue;
                     }
+                }
+                if (on_armor_resolved) {
+                    on_armor_resolved(effect_id, holder, grant_id, /*blocked=*/false);
                 }
                 ++it;
                 continue;
             }
-            if (on_armor_triggered) {
-                on_armor_triggered(t.source_effect_id, t.source_owner);
+            if (on_armor_resolved) {
+                on_armor_resolved(t.source_effect_id, t.source_owner, t.source_id, /*blocked=*/true);
             }
             if (t.is_hit_invalid_seal()) {
                 any_hit_invalid = true;

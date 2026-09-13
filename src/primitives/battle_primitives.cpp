@@ -325,14 +325,14 @@ FixedDamageResult deal_pink_damage(BattleContext* ctx, int target, int amount,
                                        : FixedDamageResult::SUCCESS;
 }
 
-void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute,
-                bool attack, int count, int duration_rounds, bool penetrable, int source_slot,
-                EffectScope scope, bool hit_invalid, int chance_pct, bool consumed_when_pierced) {
+int seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute,
+               bool attack, int count, int duration_rounds, bool penetrable, int source_slot,
+               EffectScope scope, bool hit_invalid, int chance_pct, bool consumed_when_pierced) {
     if (!ctx || source < 0 || source > 1 || target < 0 || target > 1 || count <= 0) {
-        return;
+        return 0;
     }
     if (!attribute && !attack) {
-        return;
+        return 0;
     }
     // 统一调度到 RuleCenter：source=挂载(施放)方，target=生效(被封)方。scope 默认 ON_STAGE。
     // 命中失效语义(SEAL_ATTRIBUTE_HIT)只在"封属性技能"下有意义。
@@ -357,16 +357,15 @@ void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool 
     // 回合型 / 次数型**二选一**（文档 §5.1）：有 duration 走回合型（remaining_counts 不设，
     // 响应不消耗，靠 tick/断回合结束）；否则走次数型（响应即减，减到 0 注销）。
     if (duration_rounds > 0) {
-        ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
-                                     /*counts=*/0, duration_rounds, penetrable, scope,
-                                     std::move(condition), ctx->round_effect_valid_id[source],
-                                     consumed_when_pierced);
-    } else {
-        ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
-                                     count, /*rounds=*/0, penetrable, scope,
-                                     std::move(condition), ctx->round_effect_valid_id[source],
-                                     consumed_when_pierced);
+        return ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
+                                            /*counts=*/0, duration_rounds, penetrable, scope,
+                                            std::move(condition), ctx->round_effect_valid_id[source],
+                                            consumed_when_pierced);
     }
+    return ctx->rule_center_.grant_seal(source, source_slot, effect_id, target, kind,
+                                        count, /*rounds=*/0, penetrable, scope,
+                                        std::move(condition), ctx->round_effect_valid_id[source],
+                                        consumed_when_pierced);
 }
 
 void hit_effect_invalid(BattleContext* ctx, int target, HitInvalidMode mode,

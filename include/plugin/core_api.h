@@ -44,10 +44,11 @@ struct CoreApi {
     // 挂"技能拦截"（盔/威/封属，含 hit_invalid 命中失效语义）。属性/攻击/次数/回合/scope 全部可配。
     // source=挂载(施放)方、target=生效(被封)方（统一语义）。
     // chance_pct<100 = 概率封属（每次响应时掷，695/936 用）。
-    void (*seal_skill)(BattleContext*, int source, int target, int effect_id, bool attribute,
-                       bool attack, int count, int duration_rounds, bool penetrable,
-                       int source_slot, EffectScope scope, bool hit_invalid, int chance_pct,
-                       bool consumed_when_pierced);
+    // 返回**授予句柄**：配合 EVENT_SKILL_ARMOR_RESOLVED（带 grant_id）让监听器精确匹配自己那条盔。
+    int (*seal_skill)(BattleContext*, int source, int target, int effect_id, bool attribute,
+                      bool attack, int count, int duration_rounds, bool penetrable,
+                      int source_slot, EffectScope scope, bool hit_invalid, int chance_pct,
+                      bool consumed_when_pierced);
     // 反转目标自身能力下降（负等级→提升）。区别于 clear_stat_boosts（消除提升）。
     StatReversalResult (*stat_reversal)(BattleContext*, int target);
     // 反转目标的**能力提升**（正→等负，"反转对手能力提升"）。弱化类动作 →

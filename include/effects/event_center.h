@@ -29,13 +29,15 @@ enum class EventType {
     EVENT_OPPONENT_DEFEATED, // 击败对手
     EVENT_SKILL_INVALID,     // 技能无效/未命中（Skills::execute 中 emit，target = 对方）
     EVENT_ATTACK_BLOCKED,    // 攻击被拦下/归零（apply_resolved_damage 中 final<=0 时 emit）
-    // 盔/威/封属**真正生效**（RuleCenter::notify 扫到一条未被穿透、条件通过的拦截条目时 emit）。
-    // actor = 挂载方(source_owner)，target = 被拦方(user)，**amount = 该条目的 source_effect_id**。
-    // 用途：带后续子句的盔的"触发成功则…"（如 2006「免疫成功则令对手全属性+1」、
-    //   2270「触发成功则{X}%令对手{异常}」）——插件按 effect_id 匹配自己的盔即可挂子句。
-    // ⚠️ **被穿（penetrable + 穿盔凭证）的盔不会走这里** → 子句天然不触发，无需特判
-    //   （用户 2026-09-13 口径）。
-    EVENT_SKILL_ARMOR_TRIGGERED,
+    // 盔/威/封属**被结算**（真正生效 或 被穿）——RuleCenter::notify 每结算一条拦截条目就 emit。
+    // actor = 挂载方(source_owner)，target = 被拦方(user)，amount = 该条目的 source_effect_id，
+    // **grant_id = 授予句柄**（`seal_skill` 返回值），**blocked** = true 表示真正生效 / false 表示被穿。
+    // 用途：带后续子句的盔的"触发成功则…"（2006「免疫成功则令对手全属性+1」、
+    //   2270「触发成功则{X}%令对手{异常}」）——插件按 **grant_id** 精确匹配自己那一条盔。
+    // ⚠️ 为什么被穿也要发：**被穿的盔必须能把它的监听器一起撤掉**。否则——
+    //   盔A被穿（监听器留下）→ 之后盔B生效 → A/B 两个监听器都触发 → 子句多触发一次。
+    //   插件收到**自己 grant_id** 的结算信号时，无论 blocked 与否都该自删；blocked=false 就不执行子句。
+    EVENT_SKILL_ARMOR_RESOLVED,
 };
 
 /**
@@ -56,6 +58,11 @@ struct BattleEvent {
     //    **下一个**状态，判不出"这次伤害是在哪个时点造成的"（如"受到攻击伤害后"要区分
     //    攻击伤害时点 vs 粉伤时点）。emit 点当场把时点记进事件，回调读 ev.state 即可。
     int state = kNoEventState;
+    // 规则票据的**授予句柄**（盔事件用；= `seal_skill` 的返回值）。非该族事件为 -1。
+    // 用途：同 effect_id 的多条盔互相区分——监听器据此精确匹配"是不是我这条"。
+    int grant_id = -1;
+    // 盔事件专用：true = 盔**真正生效**（挡住了本次技能）；false = 被穿（penetrable + 穿盔凭证）。
+    bool blocked = false;
     static constexpr int kNoEventState = -999;
 };
 

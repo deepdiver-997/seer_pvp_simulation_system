@@ -475,11 +475,16 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
     //    与 ③层"命中效果失效"（下面 ②.5）**不是同一件事**——后者攻击/属性技能都可能。
     const SkillInvalidNotifyResult nr = ctx->rule_center_.notify(
         ctx, owner, is_attribute, this->power, cred.ignore_attack_immunity,
-        // 盔/威/封属**真正生效**（未被穿、条件通过）→ 发事件，供"触发成功则…"类后续子句挂钩。
-        // 被穿的盔不走这里 → 子句天然不触发（用户 2026-09-13 口径，无需特判）。
-        [ctx, owner](int source_effect_id, int source_owner) {
-            ctx->event_center_.emit(BattleEvent{EventType::EVENT_SKILL_ARMOR_TRIGGERED,
-                                                source_owner, owner, source_effect_id});
+        // 每条**被结算**的拦截条目（真正生效 或 被穿）都发一次事件，带上 grant_id + blocked。
+        // 用途：带后续子句的盔（"触发成功则…"）按 **grant_id** 精确匹配自己那条，
+        //   无论生效与否都自删监听器 → **被穿的盔不会留下野监听器**在下次误触发
+        //   （否则盔A被穿→监听器残留→盔B生效时 A/B 都触发，子句多执行一次）；
+        //   blocked=false（被穿）时不执行子句——"被穿之后子句自然没有了"。
+        [ctx, owner](int source_effect_id, int source_owner, int grant_id, bool blocked) {
+            BattleEvent ev{EventType::EVENT_SKILL_ARMOR_RESOLVED, source_owner, owner, source_effect_id};
+            ev.grant_id = grant_id;
+            ev.blocked = blocked;
+            ctx->event_center_.emit(ev);
         });
 
     // ②.0 强制执行（用户 2026-09-13 口径）：盔/威/封属**照常响应与消耗**（上面 notify 已经做了），

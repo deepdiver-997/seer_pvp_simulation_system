@@ -142,11 +142,13 @@ void deal_damage(BattleContext* ctx, int target, int amount,
  * 注：拦截**没有**"免断"属性——免断是 owner 级的 `ImmunityType::BREAK`（免疫内核），
  *     由 `break_round_effects` 在入口统一查询，见技能判定流程与无效效果体系.md §二。
  */
-void seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute, bool attack,
-                int count, int duration_rounds = 0, bool penetrable = true,
-                int source_slot = -1, EffectScope scope = EffectScope::ON_STAGE,
-                bool hit_invalid = false, int chance_pct = 100,
-                bool consumed_when_pierced = false);
+// @return **授予句柄**（source_id）。"盔生效/被穿"事件带上它 → 监听器据此精确匹配自己那条盔
+//         （同 effect_id 的多条盔靠它区分；被穿的盔要能用这个句柄自删监听器）。0 = 参数非法。
+int seal_skill(BattleContext* ctx, int source, int target, int effect_id, bool attribute, bool attack,
+               int count, int duration_rounds = 0, bool penetrable = true,
+               int source_slot = -1, EffectScope scope = EffectScope::ON_STAGE,
+               bool hit_invalid = false, int chance_pct = 100,
+               bool consumed_when_pierced = false);
 
 /**
  * hit_effect_invalid - 给目标方挂"命中效果失效"（③层，次数类）。
