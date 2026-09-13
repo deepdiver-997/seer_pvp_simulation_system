@@ -388,8 +388,12 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
 //      （allowAttackDamagePipeline=false → 连桶都不执行）→ 打盔破防会丢；
 //   ② 再往后挪一个时点（AFTER_ACTION）虽然无条件执行，却落在"下一次结算"之后——
 //      变威力/多段技能在同一个 ATTACK_DAMAGE 内重复结算时，第二段已读到未重置的等级。
-// 因此放在两条出口上显式调用：正常出口在 apply_resolved_damage **之后**（"先结算伤害再重置
-// 等级"），早退出口在清快照之后（打盔/技能无效照样破防）。
+// 因此放在两条出口上显式调用：
+//   · 正常出口：**紧跟第一次 `stage_simple_attack_damage`**（官方时点 = "命中之前、伤害公式
+//     计算之后、技能特效生效之前"）——不是本处理器末尾。放中间是为了给**变威力**让路：
+//     变威力"推翻第一次、按重置后的双防重算第二次"，重算必须在破防之后。
+//     对单段技能两种位置等价（第一次伤害已物化），但放中间才不会挡住将来的重算。
+//   · 早退出口：清快照之后（打盔/技能无效照样破防）。
 // 系别用**执行用技能**（技能替换后以替换技能为准），与伤害公式同源。
 void apply_crit_defense_break(BattleContext* ctx, int attacker_id) {
     if (!ctx || attacker_id < 0 || attacker_id > 1 || !ctx->crit_happened[attacker_id]) {
@@ -1080,6 +1084,10 @@ void BattleFsm::handle_BattleFirstAttackDamage(BattleContext* battleContext) {
     }
 
     stage_simple_attack_damage(battleContext, first_mover_id);
+    // ★ 暴击破防：**第一次伤害公式计算之后**就重置双防（官方时点：命中之前、伤害公式计算之后、
+    //   技能特效生效之前）。放在这里（而不是本处理器末尾）是为了给**变威力**让路——
+    //   变威力会"推翻第一次、按重置后的双防重算第二次"，重算必须在破防之后。
+    apply_crit_defense_break(battleContext, first_mover_id);
     battleContext->execute_registered_actions(first_mover_id, State::BATTLE_FIRST_ATTACK_DAMAGE);
     // 伤害修正管线：按 DamagePhase 顺序执行双方伤害效果，读写 resolvedDamage
     battleContext->damage_pipeline_.run(battleContext, first_mover_id, 1 - first_mover_id);
@@ -1088,7 +1096,6 @@ void BattleFsm::handle_BattleFirstAttackDamage(BattleContext* battleContext) {
         battleContext->resolvedDamage.final = 0;
     }
     apply_resolved_damage(battleContext);
-    apply_crit_defense_break(battleContext, first_mover_id);   // 伤害已结算完 → 再重置防御正等级
     battleContext->ws.has_attacked[first_mover_id] = true;
     battleContext->ws.skill_used[first_mover_id] = true;
     battleContext->generateState();
@@ -1189,6 +1196,8 @@ void BattleFsm::handle_BattleSecondAttackDamage(BattleContext* battleContext) {
     }
 
     stage_simple_attack_damage(battleContext, second_mover_id);
+    // ★ 暴击破防：同第一行动方——第一次公式算完就重置双防（为变威力重算让路）。
+    apply_crit_defense_break(battleContext, second_mover_id);
     battleContext->execute_registered_actions(second_mover_id, State::BATTLE_SECOND_ATTACK_DAMAGE);
     // 伤害修正管线：按 DamagePhase 顺序执行双方伤害效果，读写 resolvedDamage
     battleContext->damage_pipeline_.run(battleContext, second_mover_id, 1 - second_mover_id);
@@ -1197,7 +1206,6 @@ void BattleFsm::handle_BattleSecondAttackDamage(BattleContext* battleContext) {
         battleContext->resolvedDamage.final = 0;
     }
     apply_resolved_damage(battleContext);
-    apply_crit_defense_break(battleContext, second_mover_id);   // 伤害已结算完 → 再重置防御正等级
     battleContext->ws.has_attacked[second_mover_id] = true;
     battleContext->ws.skill_used[second_mover_id] = true;
     battleContext->generateState();
