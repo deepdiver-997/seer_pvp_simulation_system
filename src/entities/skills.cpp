@@ -193,7 +193,13 @@ bool Skills::loadSkills() {
     priority = record->priority;
     maxPP = record->max_pp;
     pp = record->max_pp;
-    critical_strike_rate = 0.0f;  // 默认不暴击；效果/测试可改（官方 crit_rate 列未接入，后续可加载）
+    // 暴击率（官方 moves.crit_rate，用户 2026-09-13 定口径）：**分母 16 的分子**——
+    // crit_rate=8 → 50%、=16 → 100%；**0 = 走基础暴击率 1/16**（不是"不会暴击"）。
+    // 本字段存**百分比**（与 ws.crit_rate_mod 的乘算口径一致，效果可直接改 mod 缩放它）。
+    {
+        const int sixteenths = record->crit_rate > 0 ? record->crit_rate : 1;
+        critical_strike_rate = static_cast<float>(sixteenths) * 100.0f / 16.0f;
+    }
     element[0] = record->type_id;
     element[1] = 0;
     rawEffectRecords = record->effects;
@@ -402,6 +408,7 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
 
     // 0) 物化本次请求凭证（穿透 697/699 + 次数授予 + 强制执行），供 ①miss 与 ②门判定读。
     materialize_attack_credential(ctx, owner, *this);
+    ctx->ws.crit_happened[owner] = false;   // 每次技能使用先清，miss 时不残留
 
     // ① 命中判定（优先级最高）：强制执行隐含必定命中 → 跳过 miss 计算。
     if (!must_hit && !ctx->ws.attack_credential[owner].force_execute) {
@@ -416,6 +423,21 @@ SkillUsageResult Skills::query_usage(BattleContext* ctx, int owner) {
                 ctx->ws.attack_credential[owner].ignore_attack_immunity);
             return SkillUsageResult::MISS;
         }
+    }
+
+    // ①.5 暴击判定（用户 2026-09-13 口径）——**判定位在 miss 之后、门判定之前**：
+    //   · 只有 **miss** 会阻止暴击（miss 已在上面 return，这里掷不到）；
+    //   · 技能无效（盔/威/封属）、命中效果失效**都保留**暴击结果——"打在盔上一样可以触发
+    //     暴击并且破对应的防御正等级"；
+    //   · **只在使用攻击技能时触发**（属性技能不掷）。
+    // 为什么必须在这里掷而不是在伤害结算处：技能无效时伤害结算**整段不执行**
+    // （handle_*_AttackDamage 因 allowAttackDamagePipeline=false 早退），在那儿掷就永远掷不到。
+    // 一次技能使用掷一次（多段/变威力共用结果）。暴击率 = 技能暴击率 × ws.crit_rate_mod。
+    if (type != SkillType::Attribute) {
+        const float rate = critical_strike_rate * ctx->ws.crit_rate_mod[owner];
+        // 万分位掷（6.25% 基础率 = 625/10000，精确）；≥100% 必暴。
+        ctx->ws.crit_happened[owner] =
+            rate >= 100.0f || (rate > 0.0f && (std::rand() % 10000) < static_cast<int>(rate * 100.0f));
     }
 
     // ② 门判定（技能无效中心：盔 / 威 / 封属 / 封属·命中失效）。

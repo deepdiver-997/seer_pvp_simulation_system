@@ -487,6 +487,26 @@ int clear_stat_drops(BattleContext* ctx, int target) {
     return cleared;
 }
 
+bool crit_defense_break(BattleContext* ctx, int defender, int skill_type) {
+    if (!ctx || defender < 0 || defender > 1) {
+        return false;
+    }
+    // 0=物理 → 防御(2)；1=特殊 → 特防(3)。与伤害公式的取索引一致（type + 2）。
+    if (skill_type != 0 && skill_type != 1) {
+        return false;
+    }
+    // ⚠️ 故意**不查任何免疫**：暴击破防是暴击自带规则，不是"消除强化效果"，
+    //    免消除强化(STAT_CLEAR) 与它无关（用户 2026-09-13 口径）。
+    const int stat = skill_type + 2;
+    ElfPet& pet = ctx->getPet(defender);
+    if (pet.levels[stat] <= 0) {
+        return false;   // 没有正等级可破（负等级/零不动）
+    }
+    pet.levels[stat] = 0;
+    ctx->ws.view_levels[defender][stat] = 0;   // 本体/视图同步（同其它能力等级通道）
+    return true;
+}
+
 // 转换/吸取能力提升：把 from 的**正等级**整体搬到 to 身上（from 清零，to 等量累加）。
 // 官方 effect 85"使对手的能力提升效果转化到自己身上"；effect 1287"吸取对手能力提升"同一动作，
 // 区别只在吸取成功后额外给的东西（1287 另有"下N次受击减伤"）→ 共用本原语。

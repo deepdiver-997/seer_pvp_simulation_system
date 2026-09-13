@@ -34,6 +34,9 @@ struct SkillRecord {
     int max_pp = 0;
     int cd = 0;
     int must_hit = 0;   // 官方 MustHit：1 = 必中（无视命中率）
+    // 官方 CritRate：**分母 16 的分子**（用户 2026-09-13 定口径）——crit_rate=8 → 8/16 = 50%，
+    // =16 → 100%；**0 = 走基础暴击率 1/16**（绝大多数技能是 0，不代表"不会暴击"）。
+    int crit_rate = 0;
     std::vector<SkillEffectRecord> effects;
 };
 

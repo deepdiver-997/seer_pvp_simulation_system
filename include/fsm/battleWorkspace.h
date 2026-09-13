@@ -93,7 +93,13 @@ struct BattleWorkspace {
     //========== 临时属性修正 ==========
     float dodge_rate[2];           // 闪避率
     float hit_rate_mod[2];         // 命中率修正倍率
-    float crit_rate_mod[2];        // 暴击率修正
+    float crit_rate_mod[2];        // 暴击率修正（乘算；效果"下N回合暴击率提升"每回合写它）
+    // 本次技能使用**是否暴击**——在 `query_usage`（miss 之后、门判定之前）掷一次并写入，
+    // `stage_simple_attack_damage` 只消费不重掷。为什么必须前移：判定位要在"技能无效"之前，
+    // 而伤害结算在技能无效时**根本不会执行**（handle_*_AttackDamage 因 allowAttackDamagePipeline
+    // 为 false 早退）——只有 miss 会阻止暴击，打在盔上照样暴击并破防（用户 2026-09-13 口径）。
+    // 一次技能使用掷一次（多段/变威力共用同一结果）；ws 每回合 reset 自动清。
+    bool crit_happened[2];
     float damage_add_pct[2];       // 伤害加成百分比
     int   damage_add_flat[2];      // 伤害加成固定值
     numerical_properties battle_attrs[2];        // 本回合视角的数值属性，受到效果修正但不改变真实属性

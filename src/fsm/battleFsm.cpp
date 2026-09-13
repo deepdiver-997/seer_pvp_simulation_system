@@ -353,10 +353,12 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
             snapshot.base = snapshot.base * (100 + boost_sum) / 100;
         }
     }
-    // 暴击：roll 命中 → 按暴击倍率放大 base（在减伤管线之前）。暴击抗性削减"加成"部分
-    // （如 2 倍暴击 + 50% 暴击抗性 → 1.5 倍）。crit_rate 默认 0（官方 crit_rate 未接入）。
-    const float crit_rate = skill.critical_strike_rate * ctx->ws.crit_rate_mod[attacker_id];
-    if (crit_rate > 0.0f && (rand() % 1000) < static_cast<int>(crit_rate * 10.0f)) {
+    // 暴击：**只消费** query_usage 已掷好的结果（`ws.crit_happened`），这里不再重掷。
+    // 判定位必须在"技能无效"之前（只有 miss 能阻止暴击），而本函数在技能无效时根本不会
+    // 被执行——所以掷点搬到了 query_usage 的 ①.5 步。
+    // 按暴击倍率放大 base（在减伤管线之前）。暴击抗性削减"加成"部分
+    // （如 2 倍暴击 + 50% 暴击抗性 → 1.5 倍）。
+    if (ctx->ws.crit_happened[attacker_id]) {
         const int crit_mult = ctx->ws.cached_crit_damage[attacker_id];  // 默认 200（2 倍）
         const int bonus = crit_mult - 100;
         // 读 ws 有效视图（临时 buff 可修改暴击抗性）；基线由 sync_damage_resist_view 重基。
@@ -378,6 +380,26 @@ void stage_simple_attack_damage(BattleContext* ctx, int attacker_id) {
 
     ctx->pendingDamage = snapshot;
     ctx->resolvedDamage = snapshot;
+}
+
+// 暴击破防收尾（用户 2026-09-13 口径）——攻击结算的**收尾步骤**，不是时点效果。
+// 为什么不做成时点桶效果：
+//   ① ATTACK_DAMAGE 的桶跑在 stage_simple_attack_damage **之后**、但技能无效时**整段早退**
+//      （allowAttackDamagePipeline=false → 连桶都不执行）→ 打盔破防会丢；
+//   ② 再往后挪一个时点（AFTER_ACTION）虽然无条件执行，却落在"下一次结算"之后——
+//      变威力/多段技能在同一个 ATTACK_DAMAGE 内重复结算时，第二段已读到未重置的等级。
+// 因此放在两条出口上显式调用：正常出口在 apply_resolved_damage **之后**（"先结算伤害再重置
+// 等级"），早退出口在清快照之后（打盔/技能无效照样破防）。
+// 系别用**执行用技能**（技能替换后以替换技能为准），与伤害公式同源。
+void apply_crit_defense_break(BattleContext* ctx, int attacker_id) {
+    if (!ctx || attacker_id < 0 || attacker_id > 1 || !ctx->ws.crit_happened[attacker_id]) {
+        return;
+    }
+    const Skills* executing = resolve_executing_skill(ctx, attacker_id);
+    if (!executing) {
+        return;
+    }
+    crit_defense_break(ctx, 1 - attacker_id, static_cast<int>(executing->type));
 }
 
 void apply_resolved_damage(BattleContext* ctx) {
@@ -1052,6 +1074,7 @@ void BattleFsm::handle_BattleFirstAttackDamage(BattleContext* battleContext) {
     if (!battleContext->ws.skill_resolution_flags[first_mover_id].allowAttackDamagePipeline) {
         clear_damage_snapshot(battleContext->pendingDamage);
         clear_damage_snapshot(battleContext->resolvedDamage);
+        apply_crit_defense_break(battleContext, first_mover_id);   // 技能无效/被盔：照样破防
         battleContext->generateState();
         return;
     }
@@ -1065,6 +1088,7 @@ void BattleFsm::handle_BattleFirstAttackDamage(BattleContext* battleContext) {
         battleContext->resolvedDamage.final = 0;
     }
     apply_resolved_damage(battleContext);
+    apply_crit_defense_break(battleContext, first_mover_id);   // 伤害已结算完 → 再重置防御正等级
     battleContext->ws.has_attacked[first_mover_id] = true;
     battleContext->ws.skill_used[first_mover_id] = true;
     battleContext->generateState();
@@ -1159,6 +1183,7 @@ void BattleFsm::handle_BattleSecondAttackDamage(BattleContext* battleContext) {
         log("Second mover's skill does not allow attack damage pipeline, skipping damage stage.");
         clear_damage_snapshot(battleContext->pendingDamage);
         clear_damage_snapshot(battleContext->resolvedDamage);
+        apply_crit_defense_break(battleContext, second_mover_id);   // 技能无效/被盔：照样破防
         battleContext->generateState();
         return;
     }
@@ -1172,6 +1197,7 @@ void BattleFsm::handle_BattleSecondAttackDamage(BattleContext* battleContext) {
         battleContext->resolvedDamage.final = 0;
     }
     apply_resolved_damage(battleContext);
+    apply_crit_defense_break(battleContext, second_mover_id);   // 伤害已结算完 → 再重置防御正等级
     battleContext->ws.has_attacked[second_mover_id] = true;
     battleContext->ws.skill_used[second_mover_id] = true;
     battleContext->generateState();

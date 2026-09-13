@@ -256,6 +256,24 @@ int clear_stat_boosts(BattleContext* ctx, int target);
 int clear_stat_drops(BattleContext* ctx, int target);
 
 /**
+ * crit_defense_break - **暴击破防**：把目标**对应防御的正等级**归 0。
+ *   物理攻击（skill_type=0）→ 防御（`levels[2]`）；特殊攻击（skill_type=1）→ 特防（`levels[3]`）
+ *   ——与伤害公式同索引（`Defense = getTempAbilityValue(defender, skill.type + 2)`）。
+ * 只清**正**等级（提升过的那一项），负等级/弱化不动。
+ *
+ * ⚠️ **不查任何免疫**（用户 2026-09-13 口径）：不查 `STAT_CLEAR`（免消除强化）——
+ *   暴击破防不是"消除强化效果"，是暴击自带的规则，跟免消除强化无关。
+ * ⚠️ 这是**引擎内建规则**（与克制倍率/暴击倍率同类），不是"效果"——调用点是攻击结算的
+ *   收尾步骤，不在时点桶里。原因：技能无效（盔）时 ATTACK_DAMAGE 整段早退、桶根本不执行，
+ *   而"打在盔上一样触发暴击并破防"要求它照样生效。
+ *
+ * @param defender    被破防方（0/1）
+ * @param skill_type  0=物理 / 1=特殊（SkillType 的整数值）；其它值不动作
+ * @return true = 确实破了（原本该项为正等级）
+ */
+bool crit_defense_break(BattleContext* ctx, int defender, int skill_type);
+
+/**
  * transfer_stat_boosts - 转换/吸取能力提升：from 的**正等级**整体搬到 to（from 清零、to 等量累加）。
  * 官方 effect 85"使对手的能力提升效果转化到自己身上" / effect 1287"吸取对手能力提升"是同一动作，
  * 区别只在吸取成功后额外给的东西 → 共用本原语。
